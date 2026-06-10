@@ -111,9 +111,14 @@ class DecryptWorker(QThread):
 
             ftype = self._detect_type(self.input_path)
             if ftype is None:
-                self._log('Error: Unknown file type')
-                self.finished.emit(False, '')
-                return
+                ext = os.path.splitext(self.input_path)[1].lower()
+                if ext in ('.kfx', '.azw', '.azw3', '.azw4', '.mobi', '.prc', '.tpz'):
+                    self._log(f'Unknown header but extension is {ext} — trying Kindle handler')
+                    ftype = 'MOBI'
+                else:
+                    self._log('Error: Unknown file type')
+                    self.finished.emit(False, '')
+                    return
             self._log(f'Detected type: {ftype}')
 
             success = False
@@ -217,13 +222,13 @@ class DecryptWorker(QThread):
                 self._log(f'  Failed: {e}')
         return False
 
-    # --- Kindle Mobi / KF8 / Topaz ---
+    # --- Kindle Mobi / KF8 / Topaz / KFX ---
     def _decrypt_kindle_mobi(self):
         serials = self.config.get_serials()
         pids = self.config.get_pids()
         kindle_keys = list(self.config.get_kindle_keys().items())
         skeyfile = self.config.get_kindle_extra_keyfile()
-        android_files = []  # No Android backup support in GUI yet
+        android_files = []
 
         start = time.time()
         self._log(f'Trying {len(kindle_keys)} Kindle key(s), {len(serials)} serial(s), {len(pids)} PID(s)')
@@ -239,7 +244,20 @@ class DecryptWorker(QThread):
             self._log('Decryption succeeded!')
             return True
         except Exception as e:
-            self._log(f'Decryption failed: {e}')
+            err = str(e)
+            self._log(f'Direct decrypt failed: {err}')
+
+            # If it's a raw DRMION file, try auto-wrapping with companion files
+            if 'DRMION' in err or '.kfx-zip' in err:
+                parent = os.path.dirname(self.input_path)
+                if parent and any(
+                    f != os.path.basename(self.input_path)
+                    for f in os.listdir(parent)
+                    if os.path.isfile(os.path.join(parent, f))
+                ):
+                    self._log('Detected companion files, attempting auto-wrap to KFX-ZIP...')
+                    return self._decrypt_kindle_kfx_from_raw()
+
             return False
 
     # --- Kindle KFX from raw DRMION (auto-wrap to .kfx-zip) ---
@@ -257,25 +275,58 @@ class DecryptWorker(QThread):
 
         try:
             with zf_mod.ZipFile(tmp_zip, 'w', zf_mod.ZIP_DEFLATED) as zf:
-                for fname in sorted(os.listdir(parent)):
-                    fpath = os.path.join(parent, fname)
-                    if os.path.isfile(fpath) and fname != os.path.basename(tmp_zip):
-                        zf.write(fpath, fname)
-                        self._log(f'  Added: {fname}')
+                for root, dirs, files in os.walk(parent):
+                    for fname in files:
+                        fpath = os.path.join(root, fname)
+                        arcname = os.path.relpath(fpath, parent)
+                        if os.path.basename(fpath) != os.path.basename(tmp_zip):
+                            zf.write(fpath, arcname)
+                            self._log(f'  Added: {arcname}')
         except Exception as e:
             self._log(f'Failed to create KFX-ZIP: {e}')
             return False
 
         try:
+            # Build PID list from configured keys/serials (same as GetDecryptedBook)
+            serials = self.config.get_serials()
+            pids = list(self.config.get_pids())
+            kindle_keys = list(self.config.get_kindle_keys().items())
             skeyfile = self.config.get_kindle_extra_keyfile()
-            book = kfxdedrm.KFXZipBook(tmp_zip, skeyfile)
-            book.processBook([''])
-            outdir = os.path.dirname(self.output_path)
-            if outdir and not os.path.isdir(outdir):
-                os.makedirs(outdir, exist_ok=True)
-            book.getFile(self.output_path)
-            self._log('Decryption succeeded!')
-            return True
+
+            # Try GetDecryptedBook first (handles all PID generation)
+            try:
+                book = k4mobidedrm.GetDecryptedBook(
+                    tmp_zip, kindle_keys, [], serials, pids,
+                    starttime=time.time(), skeyfile=skeyfile,
+                    remove_watermarks=self.config.get_remove_watermarks()
+                )
+                outdir = os.path.dirname(self.output_path)
+                if outdir and not os.path.isdir(outdir):
+                    os.makedirs(outdir, exist_ok=True)
+                book.getFile(self.output_path)
+                book.cleanup()
+                self._log('Decryption succeeded!')
+                return True
+            except Exception as ge:
+                self._log(f'GetDecryptedBook failed: {ge}')
+                # Fallback to direct KFXZipBook with PID list
+                totalpids = list(pids)
+                from DeDRM_plugin import kgenpids
+                import json as _json
+                for dbfile, db in kindle_keys:
+                    md1, md2 = (None, None)
+                    totalpids.extend(kgenpids.getPidList(md1, md2, serials, [[dbfile, db]]))
+                totalpids = list(set(totalpids))
+                self._log(f'Generated {len(totalpids)} PID(s) from keys and serials')
+
+                book = kfxdedrm.KFXZipBook(tmp_zip, skeyfile)
+                book.processBook(totalpids)
+                outdir = os.path.dirname(self.output_path)
+                if outdir and not os.path.isdir(outdir):
+                    os.makedirs(outdir, exist_ok=True)
+                book.getFile(self.output_path)
+                self._log('Decryption succeeded!')
+                return True
         except Exception as e:
             self._log(f'KFX decryption failed: {e}')
             return False

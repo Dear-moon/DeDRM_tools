@@ -92,7 +92,7 @@ class DecryptTab(QWidget):
     def _browse_input(self):
         path, _ = QFileDialog.getOpenFileName(
             self, 'Select encrypted ebook',
-            '', 'Ebooks (*.epub *.pdf *.mobi *.azw *.azw3 *.azw4 *.prc *.tpz *.kfx-zip *.pdb);;All Files (*)'
+            '', 'Ebooks (*.epub *.pdf *.mobi *.azw *.azw3 *.azw4 *.prc *.tpz *.kfx *.kfx-zip *.pdb);;All Files (*)'
         )
         if path:
             self.input_edit.setText(path)
@@ -142,10 +142,22 @@ class DecryptTab(QWidget):
             return 'PDF'
         if header.startswith(b'\xeaDRMION\xee'):
             parent = os.path.dirname(filepath)
-            voucher = any(f.endswith('.voucher') for f in os.listdir(parent or '.') if os.path.isfile(os.path.join(parent, f)))
-            if voucher:
-                return 'KFX (auto-wrap to .kfx-zip)'
-            return 'KFX (raw DRMION — no voucher found, cannot decrypt)'
+            try:
+                count = 0
+                has_voucher = False
+                for root, dirs, files in os.walk(parent or '.'):
+                    for f in files:
+                        if os.path.join(root, f) != filepath:
+                            count += 1
+                            if f == 'voucher':
+                                has_voucher = True
+            except OSError:
+                count = 0
+            if has_voucher:
+                return 'KFX (DRM voucher found — auto-wrap to .kfx-zip)'
+            if count > 0:
+                return 'KFX (auto-wrap with {0} companion file(s))'.format(count)
+            return 'KFX (raw DRMION — no companion files found)'
         if header.startswith(b'TPZ'):
             return 'TPZ (Topaz)'
         magic = header[0x3C:0x3C + 8]
