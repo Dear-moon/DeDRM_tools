@@ -7,3 +7,21 @@
 # Cache
 /DeDRM_plugin/__pycache__
 /DeDRM_plugin/standalone/__pycache__
+
+# Build artifacts
+/build/
+/dist/
+*.spec
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Local config (contains user keys — NEVER commit)
+*.json
+!**/package.json
