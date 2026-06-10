@@ -1,102 +1,102 @@
 # DeDRM Standalone GUI
 
-一键去除 Kindle / Adobe / B&N / LCP 电子书 DRM 的独立图形化工具。**无需 Calibre**，拖拽即用。
+One-click DRM removal for Kindle / Adobe / B&N / LCP ebooks. **No Calibre required.** Drag, drop, decrypt.
 
-## 快速开始
+## Quick Start
 
-1. 从 [Releases](../../releases) 下载 `DeDRM_GUI.exe`
-2. 双击运行
-3. 把加密电子书拖进窗口 → 点 **Decrypt**
+1. Download `DeDRM_GUI.exe` from [Releases](../../releases)
+2. Double-click to launch
+3. Drag your encrypted ebook into the window → click **Decrypt**
 
-首次使用需提取密钥（见下文）。
+First-time use requires key extraction (see below).
 
-## 支持格式
+## Supported Formats
 
-| DRM 类型 | 格式 | 密钥要求 |
-|---------|------|---------|
-| Kindle for PC (KFX/KF8/Mobi/Topaz) | `.azw` `.azw3` `.mobi` `.kfx-zip` | K4PC 账户密钥 |
-| Kindle e-ink 设备 (KFX) | `.kfx` | 设备序列号 |
-| Adobe ADEPT | `.epub` `.pdf` | ADE 私钥 (.der) |
-| B&N PassHash | `.epub` | 姓名+信用卡号 |
-| Readium LCP | `.epub` | 密码短语 |
+| DRM Scheme | Formats | Key Required |
+|-----------|---------|-------------|
+| Kindle for PC (KFX/KF8/Mobi/Topaz) | `.azw` `.azw3` `.mobi` `.kfx-zip` | K4PC account key |
+| Kindle e-ink (KFX) | `.kfx` | Device serial number |
+| Adobe ADEPT | `.epub` `.pdf` | ADE private key (.der) |
+| B&N PassHash | `.epub` | Name + credit card number |
+| Readium LCP | `.epub` | Passphrase |
 
-## 使用流程
+## Usage
 
-### Kindle for PC (最常用)
+### Kindle for PC (most common)
 
-**1. 提取密钥** — 点击 Decrypt Tab 的 **Refresh Keys**：
-- 自动扫描本机 Kindle for PC 注册表
-- 自动运行 KFX 密钥提取器
-- 弹窗显示导入结果
+**1. Extract keys** — Click **Refresh Keys** on the Decrypt Tab:
+- Auto-scans local Kindle for PC registry
+- Auto-runs the KFX key extractor
+- Shows import summary
 
-或手动运行：
+Or manually:
 ```cmd
 cd standalone_gui\tools
 KFXKeyExtractor28.exe "%USERPROFILE%\Documents\My Kindle Content" kfxkey k4ikey.k4i
 ```
-将生成的 `kfxkey` 和 `k4ikey.k4i` 拖入 GUI 窗口自动导入。
+Then drag the generated `kfxkey` and `k4ikey.k4i` into the GUI window.
 
-**2. 解密** — 拖入 `.azw` 文件（位于 `Documents\My Kindle Content\B0XXX_EBOK\`），自动检测类型，点 Decrypt。
+**2. Decrypt** — Drag the `.azw` file (from `Documents\My Kindle Content\B0XXX_EBOK\`) into the window. File type is auto-detected. Click **Decrypt**.
 
-### Kindle e-ink 设备 (Paperwhite / Oasis 等)
+### Kindle e-ink (Paperwhite / Oasis etc.)
 
-**1. 输入序列号** — 在 **Serials & PIDs Tab** 输入 Kindle 设备序列号（可在亚马逊账户 → 管理设备页面找到，格式如 `G090 XXXX XXXX XXXX`）。
+**1. Enter serial number** — In the **Serials & PIDs Tab**, enter your Kindle device serial number (find it at Amazon → Manage Your Devices, format like `G090 XXXX XXXX XXXX`).
 
-**2. 复制书籍** — 将 Kindle 连接电脑，复制整个书籍目录（如 `Documents/火星三部曲_B07XXX.sdr/`）到桌面。
+**2. Copy book folder** — Connect your Kindle via USB and copy the entire book folder (e.g. `Documents/BookTitle_B07XXX.sdr/`) to your PC.
 
-**3. 解密** — 拖入目录中的 `.kfx` 文件，自动检测 voucher 并递归打包全部配套文件（含子目录 `assets/`），点 Decrypt。
+**3. Decrypt** — Drag the `.kfx` file from the folder into the window. The voucher in `assets/` and all companion files are auto-detected and packaged. Click **Decrypt**.
 
 ### Adobe / B&N / LCP
 
-在对应 Tab 中导入密钥或输入密码后，拖入 `.epub` / `.pdf` 即可解密。
+Import your keys or enter your passphrase in the corresponding tab, then drag in `.epub` / `.pdf` files to decrypt.
 
-## 拖拽导入
+## Drag & Drop
 
-所有文件均可直接拖到窗口上，自动识别：
+Drop any supported file onto the window — it's routed automatically:
 
-| 拖入文件 | 行为 |
-|---------|------|
-| `.azw` `.epub` `.pdf` `.kfx` `.mobi` 等 | 填入 Decrypt Tab |
-| `.k4i` | 导入 Kindle 账户密钥 |
-| `.der` | 导入 Adobe ADE 密钥 |
-| `kfxkey` / `keyfile`（无后缀） | 设置 KFX voucher 密钥文件 |
+| File | Action |
+|------|--------|
+| `.azw` `.epub` `.pdf` `.kfx` `.mobi` etc. | Load into Decrypt Tab |
+| `.k4i` | Import as Kindle account key |
+| `.der` | Import as Adobe ADE key |
+| `kfxkey` / `keyfile` (no extension) | Set as KFX voucher key file |
 
-## 界面说明
+## Tabs
 
-| Tab | 功能 |
-|-----|------|
-| **Decrypt** | 文件选择、类型检测、解密、日志 |
-| **Kindle Keys** | 扫描/导入 K4PC 密钥、手动输入序列号/PID |
-| **Adobe Keys** | 扫描/导入 ADE 密钥、PDF 密码管理 |
-| **B&N Keys** | 扫描/生成 Nook PassHash 密钥 |
-| **Serials & PIDs** | Kindle 设备序列号、eReader PID 管理 |
-| **Settings** | 字体去混淆、水印移除、KFX voucher 路径 |
+| Tab | Purpose |
+|-----|---------|
+| **Decrypt** | File selection, type detection, decryption, log |
+| **Kindle Keys** | Scan/import K4PC keys, manual serial/PID entry |
+| **Adobe Keys** | Scan/import ADE keys, PDF password management |
+| **B&N Keys** | Scan/generate Nook PassHash keys |
+| **Serials & PIDs** | Kindle serial numbers, eReader PIDs |
+| **Settings** | Font deobfuscation, watermark removal, KFX voucher path |
 
-## 从源码运行
+## Run from Source
 
 ```bash
 pip install pycryptodome lxml PyQt6 legacy-cgi
 python standalone_gui/main.py
 ```
 
-## 构建
+## Build
 
 ```bash
 pip install pyinstaller
 pyinstaller dedrm_gui.spec
-# 输出 → dist/DeDRM_GUI.exe
+# Output → dist/DeDRM_GUI.exe
 ```
 
-## 致谢
+## Credits
 
-基于以下开源工作：
+Based on the following open-source projects:
 
-- [noDRM/DeDRM_tools](https://github.com/noDRM/DeDRM_tools) — Calibre DeDRM 插件
-- [Satsuoni/DeDRM_tools](https://github.com/Satsuoni/DeDRM_tools) — 持续维护分支
-- Apprentice Harper, Apprentice Alf — 原始 DeDRM 工具
+- [noDRM/DeDRM_tools](https://github.com/noDRM/DeDRM_tools) — Calibre DeDRM plugin
+- [Satsuoni/DeDRM_tools](https://github.com/Satsuoni/DeDRM_tools) — maintained fork
+- Apprentice Harper, Apprentice Alf — original DeDRM tools
 - The Dark Reverser — MobiDeDRM
-- i♥cabbages — Adobe ADEPT 脚本
-- meaclam, uhuxybim — LCP 解密
+- i♥cabbages — Adobe ADEPT scripts
+- meaclam, uhuxybim — LCP decryption
 
 ## License
 
