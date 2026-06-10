@@ -112,18 +112,21 @@ class KeyScanWorker(QThread):
         self.found_keys.emit(self.MODE_KINDLE, keys, names)
 
     def _do_scan_kindle(self):
-        from DeDRM_plugin import kindlekey
         self._log('--- Kindle keys ---')
+        keys = []
 
         # 1. Standard scan via kindlekey (registry / files)
-        keys = []
         try:
-            raw_keys = kindlekey.kindlekeys()
-            for k in raw_keys:
-                keys.append(json.dumps(k))
-            self._log(f'  Registry scan: found {len(raw_keys)} key(s)')
-        except Exception as e:
-            self._log(f'  Registry scan error: {e}')
+            from DeDRM_plugin import kindlekey
+            try:
+                raw_keys = kindlekey.kindlekeys()
+                for k in raw_keys:
+                    keys.append(json.dumps(k))
+                self._log(f'  Registry scan: found {len(raw_keys)} key(s)')
+            except Exception as e:
+                self._log(f'  Registry scan error: {e}')
+        except ImportError as e:
+            self._log(f'  kindlekey module not available: {e}')
 
         # 2. Auto-run KFX extractor if available
         extractor = _find_extractor()
@@ -162,18 +165,27 @@ class KeyScanWorker(QThread):
         keys = []
         tmpdir = tempfile.mkdtemp(prefix='dedrm_kfx_')
         try:
+            # CREATE_NO_WINDOW = 0x08000000, suppresses console/error dialogs
+            creationflags = 0
+            if sys.platform.startswith('win'):
+                creationflags = 0x08000000  # CREATE_NO_WINDOW
             proc = subprocess.run(
                 [extractor_path, content_dir, 'keyfile', 'kindle_account.k4i'],
                 cwd=tmpdir,
                 capture_output=True,
                 text=True,
                 timeout=60,
+                creationflags=creationflags,
             )
             if proc.returncode != 0:
-                self._log(f'  Extractor error (code {proc.returncode}):')
-                for line in proc.stderr.strip().split('\n')[:5]:
-                    if line.strip():
-                        self._log(f'    {line.strip()}')
+                stderr = proc.stderr.strip()
+                if stderr:
+                    self._log(f'  Extractor error (code {proc.returncode}):')
+                    for line in stderr.split('\n')[:5]:
+                        if line.strip():
+                            self._log(f'    {line.strip()}')
+                else:
+                    self._log(f'  Extractor returned code {proc.returncode} (no books to process?)')
                 return keys
 
             # Check output files (extractor uses different names for different versions)

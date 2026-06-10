@@ -59,6 +59,19 @@ class DecryptWorker(QThread):
         if header.startswith(MAGIC_PDF):
             return 'PDF'
 
+        # Raw KFX DRMION — check for companion voucher to auto-wrap
+        if header.startswith(b'\xeaDRMION\xee'):
+            parent = os.path.dirname(filepath)
+            if parent:
+                try:
+                    for fname in os.listdir(parent):
+                        if fname.endswith('.voucher'):
+                            self._log('Found companion voucher, will auto-wrap to KFX-ZIP')
+                            return 'KFX_RAW'
+                except OSError:
+                    pass
+            return None  # No voucher available
+
         if header.startswith(MAGIC_TPZ):
             return 'TPZ'
 
@@ -106,10 +119,10 @@ class DecryptWorker(QThread):
             success = False
             if ftype == 'PDF':
                 success = self._decrypt_pdf()
-            elif ftype in ('MOBI', 'TPZ'):
+            elif ftype in ('MOBI', 'TPZ', 'KFX-ZIP'):
                 success = self._decrypt_kindle_mobi()
-            elif ftype == 'KFX-ZIP':
-                success = self._decrypt_kindle_kfx()
+            elif ftype == 'KFX_RAW':
+                success = self._decrypt_kindle_kfx_from_raw()
             elif ftype in ('ADEPT', 'ADEPT-PassHash'):
                 success = self._decrypt_adobe_epub()
             elif ftype == 'LCP':
@@ -229,7 +242,50 @@ class DecryptWorker(QThread):
             self._log(f'Decryption failed: {e}')
             return False
 
-    # --- Kindle KFX ---
+    # --- Kindle KFX from raw DRMION (auto-wrap to .kfx-zip) ---
+
+    def _decrypt_kindle_kfx_from_raw(self):
+        """Wrap raw DRMION + companion files into a temp .kfx-zip, then decrypt."""
+        parent = os.path.dirname(self.input_path)
+        if not parent:
+            self._log('Cannot determine parent directory')
+            return False
+
+        import zipfile as zf_mod
+        tmp_zip = os.path.join(parent, '_dedrm_tmp.kfx-zip')
+        self._log(f'Creating temporary KFX-ZIP: {tmp_zip}')
+
+        try:
+            with zf_mod.ZipFile(tmp_zip, 'w', zf_mod.ZIP_DEFLATED) as zf:
+                for fname in sorted(os.listdir(parent)):
+                    fpath = os.path.join(parent, fname)
+                    if os.path.isfile(fpath) and fname != os.path.basename(tmp_zip):
+                        zf.write(fpath, fname)
+                        self._log(f'  Added: {fname}')
+        except Exception as e:
+            self._log(f'Failed to create KFX-ZIP: {e}')
+            return False
+
+        try:
+            skeyfile = self.config.get_kindle_extra_keyfile()
+            book = kfxdedrm.KFXZipBook(tmp_zip, skeyfile)
+            book.processBook([''])
+            outdir = os.path.dirname(self.output_path)
+            if outdir and not os.path.isdir(outdir):
+                os.makedirs(outdir, exist_ok=True)
+            book.getFile(self.output_path)
+            self._log('Decryption succeeded!')
+            return True
+        except Exception as e:
+            self._log(f'KFX decryption failed: {e}')
+            return False
+        finally:
+            try:
+                os.unlink(tmp_zip)
+            except Exception:
+                pass
+
+    # --- Kindle KFX (already in .kfx-zip format) ---
     def _decrypt_kindle_kfx(self):
         skeyfile = self.config.get_kindle_extra_keyfile()
         try:

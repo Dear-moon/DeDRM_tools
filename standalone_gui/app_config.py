@@ -58,21 +58,29 @@ class AppConfig:
 
     def add_adept_key(self, name, key_hex):
         self.prefs.addnamedvaluetoprefs('adeptkeys', name, key_hex)
+        self._cfg().commit()
 
     def add_bandn_key(self, name, key_b64):
         self.prefs.addnamedvaluetoprefs('bandnkeys', name, key_b64)
+        self._cfg().commit()
 
     def add_kindle_key(self, name, key_json):
         self.prefs.addnamedvaluetoprefs('kindlekeys', name, key_json)
+        self._cfg().commit()
 
     def add_serial(self, serial):
-        self.prefs.addvaluetoprefs('serials', serial)
+        ok = self.prefs.addvaluetoprefs('serials', serial)
+        self._cfg().commit()
+        return ok
 
     def add_pid(self, pid):
-        self.prefs.addvaluetoprefs('pids', pid)
+        ok = self.prefs.addvaluetoprefs('pids', pid)
+        self._cfg().commit()
+        return ok
 
     def add_adobe_pdf_passphrase(self, pw):
         self.prefs.addvaluetoprefs('adobe_pdf_passphrases', pw)
+        self._cfg().commit()
 
     def remove_key(self, kind, name):
         if name in self.prefs[kind]:
@@ -81,9 +89,11 @@ class AppConfig:
 
     def set_deobfuscate_fonts(self, value):
         self.prefs.set('deobfuscate_fonts', value)
+        self._cfg().commit()
 
     def set_remove_watermarks(self, value):
         self.prefs.set('remove_watermarks', value)
+        self._cfg().commit()
 
     def get_deobfuscate_fonts(self):
         return self._cfg().get('deobfuscate_fonts', True)

@@ -21,7 +21,6 @@ class DecryptTab(QWidget):
         self.config = config
         self._worker = None
         self._scan_worker = None
-        self.setAcceptDrops(True)
         self._init_ui()
 
     def _init_ui(self):
@@ -128,8 +127,10 @@ class DecryptTab(QWidget):
             self.info_label.setText(f'Type: {ftype}  |  Available keys: {key_count}')
             self.decrypt_btn.setEnabled(True)
         else:
-            self.info_label.setText('Unknown or unsupported file type')
+            hexhdr = hdr[:16].hex(' ').upper()
+            self.info_label.setText(f'Unknown type — header: {hexhdr}')
             self.decrypt_btn.setEnabled(False)
+            self._append_log(f'Unknown file header (first 16 bytes): {hexhdr}')
 
         # Auto-set output
         if not self.output_edit.text():
@@ -139,13 +140,19 @@ class DecryptTab(QWidget):
     def _sniff(self, header, filepath):
         if header.startswith(b'%PDF'):
             return 'PDF'
+        if header.startswith(b'\xeaDRMION\xee'):
+            parent = os.path.dirname(filepath)
+            voucher = any(f.endswith('.voucher') for f in os.listdir(parent or '.') if os.path.isfile(os.path.join(parent, f)))
+            if voucher:
+                return 'KFX (auto-wrap to .kfx-zip)'
+            return 'KFX (raw DRMION — no voucher found, cannot decrypt)'
         if header.startswith(b'TPZ'):
-            return 'TPZ'
+            return 'TPZ (Topaz)'
         magic = header[0x3C:0x3C + 8]
         if magic in (b'BOOKMOBI', b'TEXtREAd'):
-            return 'MOBI'
+            return 'Kindle (MOBI/KF8)'
         if magic in (b'PNRdPPrs', b'PDctPPrs'):
-            return 'PDB'
+            return 'PDB (eReader)'
         if header.startswith(b'PK\x03\x04'):
             # Try quick checks
             try:
@@ -166,16 +173,18 @@ class DecryptTab(QWidget):
         return None
 
     def _count_keys(self, ftype):
-        if ftype in ('ADEPT', 'PDF'):
-            return len(self.config.get_adept_keys())
-        if ftype == 'ADEPT-PassHash':
-            return len(self.config.get_bandn_keys())
-        if ftype in ('MOBI', 'TPZ', 'KFX-ZIP'):
+        if not ftype:
+            return 0
+        if 'PDF' in ftype or 'ADEPT' in ftype:
+            return len(self.config.get_adept_keys()) + len(self.config.get_bandn_keys())
+        if 'Kindle' in ftype or 'KFX' in ftype or 'MOBI' in ftype or 'TPZ' in ftype:
             return len(self.config.get_kindle_keys()) + len(self.config.get_serials()) + len(self.config.get_pids())
-        if ftype == 'LCP':
+        if 'LCP' in ftype:
             return len(self.config.get_lcp_passphrases())
-        if ftype == 'PDB':
+        if 'PDB' in ftype:
             return len(self.config._cfg().get('ereaderkeys', {}))
+        if 'ZIP' in ftype:
+            return 0
         return 0
 
     def _on_decrypt(self):
@@ -313,12 +322,3 @@ class DecryptTab(QWidget):
 
         self.refresh()
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        urls = event.mimeData().urls()
-        if urls:
-            path = urls[0].toLocalFile()
-            self.input_edit.setText(path)

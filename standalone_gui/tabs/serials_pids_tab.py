@@ -67,24 +67,30 @@ class SerialsPIDsTab(QWidget):
         s = self.serial_edit.text().strip()
         if s:
             if self.config.add_serial(s):
+                self.config.prefs.dedrmprefs.commit()
                 self.serial_edit.clear()
                 self._refresh()
+            else:
+                QMessageBox.information(self, 'Info', 'Serial already exists or could not be added')
 
     def _del_serial(self):
         for item in self.serial_list.selectedItems():
-            # Remove from config by value
             serials = self.config.get_serials()
             if item.text() in serials:
                 serials.remove(item.text())
                 self.config.prefs.set('serials', serials)
+                self.config.prefs.dedrmprefs.commit()
         self._refresh()
 
     def _add_pid(self):
         p = self.pid_edit.text().strip()
         if p:
             if self.config.add_pid(p):
+                self.config.prefs.dedrmprefs.commit()
                 self.pid_edit.clear()
                 self._refresh()
+            else:
+                QMessageBox.information(self, 'Info', 'PID already exists or could not be added')
 
     def _del_pid(self):
         for item in self.pid_list.selectedItems():
@@ -92,4 +98,5 @@ class SerialsPIDsTab(QWidget):
             if item.text() in pids:
                 pids.remove(item.text())
                 self.config.prefs.set('pids', pids)
+                self.config.prefs.dedrmprefs.commit()
         self._refresh()
