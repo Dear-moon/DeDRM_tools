@@ -250,6 +250,27 @@ std::string ReadFileToString(const std::string& filePath) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
+std::vector<char> ReadFileToVector(const std::string& filePath) 
+{
+    std::ifstream file(filePath, std::ios::in | std::ios::binary);
+    if (!file.is_open()) {
+        std::cout<<"Could not open" << strerror(errno) << std::endl;
+        return std::vector<char>();
+    }
+    return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+std::vector<char> ReadFileToVector(const fs::path& filePath) 
+{
+
+    std::ifstream file(filePath, std::ios::in | std::ios::binary);
+    if (!file.is_open()) {
+        std::cout << "Could not open" << strerror(errno) << std::endl;
+        return std::vector<char>();
+    }
+    return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+}
+
 //--------------------------------------- ION reader
 
 
@@ -1325,7 +1346,7 @@ struct ExecOffsets
 {
     int luceneaddr = 0;
     int make_storage = 0;
-    //int get_storage_value = 0; 
+    int get_storage_value = 0; 
     int deobfuscate_storage = 0;
     int get_plugin_man = 0;
     int load_all = 0;
@@ -1353,7 +1374,7 @@ ExecOffsets KindleReader1_0_15230()
     ret.make_storage = 0x10dbf3c0;
     ret.deobfuscate_storage= 0x1009b8d0;
 
-    //ret.get_storage_value = 0x04b8c80;
+    ret.get_storage_value = 0x1009c820;
 
     ret.spatch= 0x10065a60;
     ret.get_plugin_man = 0x11057890;
@@ -1555,27 +1576,6 @@ void PrintSimpleCallStack() {
 }
 
 #pragma intrinsic(_ReturnAddress)
-HANDLE CreateFileWFake(
-             LPCWSTR               lpFileName,
-               DWORD                 dwDesiredAccess,
-            DWORD                 dwShareMode,
-   LPSECURITY_ATTRIBUTES lpSecurityAttributes,
-              DWORD                 dwCreationDisposition,
-             DWORD                 dwFlagsAndAttributes,
-     HANDLE                hTemplateFile
-)
-{
-    std::wcout << "CreateFileW " << lpFileName << " access "<< dwDesiredAccess<< std::endl;
-
-
- 
-        // Captures the exact address in memory that called this function
-        void* callerAddress = _ReturnAddress();
-
-        std::cout << "[+] This function was called from address: 0x" << std::hex << callerAddress << "  " << (int)callerAddress-globoffs<<std::endl;
-        PrintSimpleCallStack();
-    return CreateFileW(lpFileName, dwDesiredAccess,dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-}
 
 
 // Helper function to write a byte buffer to a file
@@ -2245,6 +2245,7 @@ std::map<std::string,std::string> QHashToMD5Map(QHashData* hashData)
 
                 arr = (QBArray*)&dataNode->value;
                 std::string st((char*)((int)arr->d + arr->d->offset), arr->d->size);
+                std::cout << "Md5: " << md5 << " Value: " << st << std::endl;
                 ret[md5] = st;
                 discoveredCount++;
             }
@@ -2343,7 +2344,7 @@ std::wstring GetExternalInstallPath(const wchar_t* packageFullName)
 
         if (rc == ERROR_SUCCESS) {
             std::wcout << L"Install Path: " << path.data() << std::endl;
-            return std::wstring(path.begin(), path.end());
+            return std::wstring(path.data());
         }
     }
     std::cout << "Failed to find package path. Error code: " << rc << std::endl;
@@ -3306,6 +3307,33 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
     return;
 }
 
+void writeFileBasic(const fs::path& filename, const std::vector<char>& data) 
+{
+    std::ofstream file(filename, std::ios::out | std::ios::binary);
+    if (!file) 
+    {
+        std::cout <<" Could not open file " << filename << " For writing "  << strerror(errno) << std::endl;
+        return;
+    }
+  //  std::cout << hexStr((uint8_t*) & data[0], 16) << std::endl;
+    file.write(data.data(), data.size());
+}
+void degenerateCopyFile(const fs::path& f1, const fs::path& f2)
+{
+    if (f1 == f2) return;
+    //std::cout << "Trying to copy " << f1 << " to " << f2 << std::endl;
+    std::vector<char> vc = ReadFileToVector(f1);
+   // std::cout << "File size  " << vc.size()<< std::endl;
+    writeFileBasic(f2, vc);
+}
+void degenerateCopyNeededFiles(const fs::path& from, const std::vector<std::string>& files, const fs::path& to)
+{
+    fs::create_directories(to);
+    for (auto fl : files)
+    {
+        degenerateCopyFile(from/fs::path(fl),to/fs::path(fl));
+    }
+}
 int main(int argc, char* argv[])
 {
     std::map<std::string, ExecOffsets> supportMap;
@@ -3323,11 +3351,11 @@ int main(int argc, char* argv[])
         std::cout << "Please ensure that KindleReader UWP app is of the appropriate version (currently KindleReader1_0_15230)" << std::endl;
         std::cout << "In case Kindle version does not match, it would exit, probably" << std::endl;
         std::cout << "Note: to get proper values into k4i file, at least one KFX book that uses account secrets should be downloaded. If resulting k4i has no tokens set, try downloading some free books." << std::endl;
-        std::cout << "Note 2: this utility creates a temporary C:\\Data folder, where it copies all the files necessary for its function, including all of the KindleReader app, so about 800MB of space is needed. Folder can be deleted after use." << std::endl;
+        std::cout << "Note 2: this utility creates a temporary C:\\Data folder, where it copies all the files necessary for its function, including large portion of of the KindleReader app, so about 400MB of space is needed. Folder can be deleted after use." << std::endl;
         std::cout << "As usual, no guarantee, and provide its output if you ask for support." << std::endl;
        // return -1;
     }
-
+ 
 
     std::vector<basic_package_data> dat = FindPackagesViaRegistry(L"AmazonKindleReadingApp");
     if (dat.size() == 0)
@@ -3351,9 +3379,14 @@ int main(int argc, char* argv[])
     PWSTR programfiles = NULL;
     const wchar_t* key_suffix = L"LocalCache\\Local\\Microsoft\\Crypto\\PCPKSP\\";
     const wchar_t* amazon_storage = L"LocalState\\Classic\\Data\\storage\\";
-    const wchar_t* amazon_app = L"Amazon\\Kindle\\application";
+
 
     HRESULT hr = SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localcappdata);
+    wchar_t old_cwd[MAX_PATH];
+    GetCurrentDirectoryW(MAX_PATH, old_cwd);
+    fs::path current_dir = fs::path(old_cwd);
+    std::vector<std::string> storage_files = { ".kinf2024", "main_shared.blob", "main_shared.salt","main_shared.blob.sha256"};
+    std::vector<std::string> dll_files = { "CFLite.dll", "concrt140_app.dll", "d3dcompiler_47.dll", "dsx120.dll", "hermes.dll", "icudt46.dll", "icudt65.dll", "icuin46.dll", "icuin65.dll", "icuio65.dll", "icuuc46.dll", "icuuc65.dll", "JavaScriptCore.dll", "libcrypto-1_1.dll", "libEGL.dll", "libfsdk_win32.dll", "libGLESv2.dll", "libjpeg.dll", "libpngKRF.dll", "libssl-1_1.dll", "LibWebCore.dll", "libxml2.dll", "Microsoft.ReactNative.dll", "Microsoft.Web.WebView2.Core.dll", "msvcp100.dll", "msvcp120.dll", "msvcp140.dll", "msvcp140_1_app.dll", "msvcp140_2_app.dll", "msvcp140_app.dll", "msvcr100.dll", "msvcr120.dll", "opengl32sw.dll", "Picker.dll", "pthreadVC2.dll", "Qt5Core.dll", "Qt5Gui.dll", "Qt5Multimedia.dll", "Qt5MultimediaWidgets.dll", "Qt5Network.dll", "Qt5OpenGL.dll", "Qt5Positioning.dll", "Qt5PrintSupport.dll", "Qt5Qml.dll", "Qt5Script.dll", "Qt5Sensors.dll", "Qt5Sql.dll", "Qt5Svg.dll", "Qt5WebChannel.dll", "Qt5WebSockets.dll", "Qt5Widgets.dll", "Qt5WinExtras.dll", "Qt5Xml.dll", "ReactNativeAsyncStorage.dll", "RNSVG.dll", "vcamp140_app.dll", "vccorlib120.dll", "vccorlib140.dll", "vccorlib140_app.dll", "vcomp140_app.dll", "vcruntime140.dll", "vcruntime140_app.dll", "WebCoreViewer.dll", "WebView2Loader.dll", "xrm120.dll", "zlib.dll", "zlib1.dll" };
 
     // Check if the function call was successful.
     if (!SUCCEEDED(hr))
@@ -3361,7 +3394,8 @@ int main(int argc, char* argv[])
         std::cerr << "Failed to get the LocalAppData folder path. HRESULT: " << hr << std::endl;
         return 1;
     }
-    fs::path data_folder = fs::path(localcappdata).root_name() / L"\\Data";
+   // SetCurrentDirectoryW(fs::path(localcappdata).root_name().wstring().);
+    fs::path data_folder = fs::path(old_cwd).root_name() / L"\\Data";
     fs::path storage = fs::path(localcappdata)  / L"Packages" / dat[0].family_name / fs::path(amazon_storage);
     fs::path reg_data = fs::path(localcappdata) / L"Packages" / dat[0].family_name / L"LocalState\\registration_data";
     fs::path keys_path = fs::path(localcappdata) / L"Packages" / dat[0].family_name / fs::path(key_suffix);
@@ -3384,27 +3418,30 @@ int main(int argc, char* argv[])
     else
     {
         std::cout << "Making key(s) accessible" << std::endl;
+        //just in case
+       degenerateCopyFile(keys_path / L"d8c37e00045ea5de98d93811f777d227040edd50" / L"4111704e63913bc011faadfaf420c7573b17ac83.PCPKEY", key_target / L"d8c37e00045ea5de98d93811f777d227040edd50" / L"4111704e63913bc011faadfaf420c7573b17ac83.PCPKEY");
         CopyFolderContents(keys_path, key_target);
     }
     std::cout <<"Storage at: " << storage.string() << std::endl;
     std::cout << "Reg data at: " << reg_data.string() << std::endl;
-    CopyFolderContents(storage, data_folder/L"storage");
+    //CopyFolderContents(storage, data_folder/L"storage");
+    degenerateCopyNeededFiles(storage, storage_files, data_folder / L"storage");
+    //return 3;
     fs::path output_reg = data_folder / "decrypted_registration_data.dat";
     std::string dsn = decrypt_get_dsn(reg_data,output_reg);
 
     OverwriteExportTable("ucrtbase.dll", "malloc", (ULONG_PTR)&mallocFake);
     OverwriteExportTable("ucrtbase.dll", "free", (ULONG_PTR)&freeFake);
-        OverwriteExportTable("VCRUNTIME140.DLL", "memcpy", (ULONG_PTR)&memcpyFake);
+     OverwriteExportTable("VCRUNTIME140.DLL", "memcpy", (ULONG_PTR)&memcpyFake);
     OverwriteExportTable("ncrypt.dll", "NCryptOpenKey", (ULONG_PTR)&NCryptOpenKeyFake);
     OverwriteExportTable("ncrypt.dll", "NCryptDecrypt", (ULONG_PTR)&NCryptDecryptFake);
     OverwriteExportTable("ncrypt.dll", "NCryptCreatePersistedKey", (ULONG_PTR)&NCryptCreatePersistedKeyFake);
     OverwriteExportTable("ncrypt.dll", "NCryptEncrypt", (ULONG_PTR)&NCryptEncryptFake);
-    wchar_t old_cwd[MAX_PATH];
-    GetCurrentDirectoryW(MAX_PATH, old_cwd);
-    fs::path current_dir = fs::path(old_cwd);
+   
     std::wcout << "Copying folder to make it accessible: " << dat[0].install_folder << " --> " << data_folder.wstring() << std::endl;
-    CopyFolderLegacy(dat[0].install_folder.c_str(), data_folder.wstring().c_str());
-    fs::path load_path = data_folder / dat[0].full_name/L"KatxopoApp";
+    degenerateCopyNeededFiles(fs::path(dat[0].install_folder)/ L"KatxopoApp", dll_files, data_folder / dat[0].full_name / L"KatxopoApp");
+  //  CopyFolderLegacy(dat[0].install_folder.c_str(), data_folder.wstring().c_str());
+    fs::path load_path = data_folder / dat[0].full_name / L"KatxopoApp";
     std::wcout << "Trying to move to " << load_path << std::endl;
     BOOL res = SetCurrentDirectoryW(load_path.wstring().c_str());
     if (!res)
@@ -3413,12 +3450,29 @@ int main(int argc, char* argv[])
         return -3;
     }
     SetDllDirectoryW(load_path.wstring().c_str());
+    std::wcout << "Success"  << std::endl;
     HINSTANCE hlq = LoadLibraryA("Qt5Core.dll");
     if (hlq == NULL)
     {
         std::wcout << "Could not load QTCore dll, error " << GetLastError()<<std::endl;
         return -3;
     }
+    //debug...
+    /*
+    correctLatin1 = (fakeQLatin1)GetProcAddress(hlq, "?toLatin1@QString@@QGBE?AVQByteArray@@XZ");
+    correctQbyte = (fakeQbyte)GetProcAddress(hlq, "??0QByteArray@@QAE@ABV0@@Z");
+    union {
+        void* (HookHandlerLatin1::* memberFn)(void*);
+
+        void* rawAddress;
+    } converterl;
+
+    // 2. Assign the member function pointer
+    converterl.memberFn = &HookHandlerLatin1::HookedFunction;
+    // 3. Extract the raw memory address
+    void* newHook = converterl.rawAddress;
+    OverwriteExportTable("Qt5Core.dll", "?toLatin1@QString@@QGBE?AVQByteArray@@XZ", (ULONG_PTR)newHook);*/
+    /// end debug
     std::vector<char> buffer(MAX_PATH + 1);
     GetModuleFileNameA(hlq, &buffer[0], buffer.size());
     std::cout << "Loaded QT lib from: " << std::string(&buffer[0]) << std::endl;
@@ -3459,13 +3513,27 @@ int main(int argc, char* argv[])
         std::cout << "Could not get storage" << std::endl;
         return -4;
     }
-
+    ///1009c820
     unobfhash uno = (unobfhash)(stoffset + curOffs.deobfuscate_storage);
     QHashData* hdata;
     uno(kinfo, &hdata);
-    //std::cout << "Storage hdata: "  << hdata->numBuckets << "  " << hdata->nodeSize << std::endl;
+    std::cout << "Storage hdata: "  << hdata->numBuckets << " nodesize: " << hdata->nodeSize <<" amount: "<< hdata->size << std::endl;
     std::map<std::string, std::string> strmap = QHashToMD5Map(hdata);
     std::string strtokens = strmap["495631f2946141093a7e333b85fa1a3d"];
+    /*toQString toQ = (toQString)GetProcAddress(hlq, "?fromStdString@QString@@SA?AV1@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+    fromQString fromQ = (fromQString)GetProcAddress(hlq, "?toStdString@QString@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+    if (strtokens.empty())
+    {
+        std::string tokens = std::string("kindle.metrics.checksum");
+        getme getVal = (getme)(stoffset + curOffs.get_storage_value);
+        char qtokens[256];
+        void* tknz = toQ(qtokens, tokens); //std::string("kindle.account.tokens"));
+        char qstbufout[256];
+        void* nretout = toQ(qstbufout, std::string(""));
+        getVal(kinfo, nretout, tknz);
+        fromQ(nretout, strtokens);
+        
+    }*/
     std::cout << "Secret tokens: "<< strtokens << std::endl;
     if (strtokens.empty())
     {
