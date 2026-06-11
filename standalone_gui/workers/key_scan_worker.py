@@ -142,6 +142,13 @@ class KeyScanWorker(QThread):
         elif content_dir and not extractor:
             self._log(f'  Kindle content found but extractor not available')
 
+        # 2b. Optional: Frida-based live extraction (if installed)
+        if not keys:
+            frida_keys = self._try_frida_extraction()
+            if frida_keys:
+                keys.extend(frida_keys)
+                self._log(f'  Frida: extracted {len(frida_keys)} key(s) from running Kindle')
+
         # 3. Also read any kfxkey files from the tools directory
         for kf_path in self._find_kfxkey_files():
             try:
@@ -235,6 +242,50 @@ class KeyScanWorker(QThread):
             if os.path.isfile(p):
                 paths.append(p)
         return paths
+
+    def _try_frida_extraction(self):
+        """Try live key extraction via Frida (attaches to running Kindle process)."""
+        keys = []
+        try:
+            import frida
+        except ImportError:
+            self._log('  Frida not installed (pip install frida frida-tools for live extraction)')
+            return keys
+
+        self._log('  Trying Frida live extraction...')
+
+        # Locate the Frida instrumenter script
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        instr_path = os.path.join(base, 'tools', 'kindleFridaInstr.py')
+        if not os.path.isfile(instr_path):
+            self._log('  kindleFridaInstr.py not found')
+            return keys
+
+        # Run the Frida script as a subprocess (it auto-attaches to Kindle.exe)
+        try:
+            proc = subprocess.run(
+                [sys.executable, instr_path],
+                cwd=os.path.dirname(instr_path),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            output = proc.stdout + proc.stderr
+            # Parse DSN and tokens from output
+            import re
+            dsn_match = re.search(r'DSN\s+([0-9a-fA-F]+)', output)
+            token_matches = re.findall(r'Tokens?\s+([A-Za-z0-9+/=]+)', output)
+            if dsn_match:
+                key_data = {'DSN': dsn_match.group(1)}
+                if token_matches:
+                    key_data['kindle.account.new_secrets'] = token_matches
+                keys.append(json.dumps(key_data))
+        except subprocess.TimeoutExpired:
+            self._log('  Frida extraction timed out (is Kindle running?)')
+        except Exception as e:
+            self._log(f'  Frida extraction error: {e}')
+
+        return keys
 
     # --- Adobe ---
 
