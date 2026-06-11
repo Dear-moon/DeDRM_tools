@@ -123,6 +123,19 @@ class DecryptTab(QWidget):
         ftype = self._sniff(hdr, inpath)
         key_count = self._count_keys(ftype)
 
+        if ftype == 'ZIP':
+            try:
+                from zipfile import ZipFile
+                with ZipFile(inpath, 'r') as zf:
+                    for name in zf.namelist():
+                        with zf.open(name) as sf:
+                            if sf.read(4) == b'CONT':
+                                self.info_label.setText('KFX CONT container — use Calibre + KFX Input plugin')
+                                self.decrypt_btn.setEnabled(False)
+                                return
+            except Exception:
+                pass
+
         if ftype:
             self.info_label.setText(f'Type: {ftype}  |  Available keys: {key_count}')
             self.decrypt_btn.setEnabled(True)
