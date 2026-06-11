@@ -15,24 +15,22 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from standalone_gui import compat  # noqa: F401
 
 
-def _find_extractor():
-    """Locate the bundled KFX key extractor executable."""
-    candidates = []
-
-    # PyInstaller bundle path
+def _find_extractors():
+    """Locate all bundled KFX key extractor executables.
+    Returns list of (name, path) — tried in order.
+    """
     if getattr(sys, 'frozen', False):
         base = sys._MEIPASS
     else:
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     tools_dir = os.path.join(base, 'tools')
-    candidates.append(os.path.join(tools_dir, 'KFXKeyExtractor28.exe'))
-    candidates.append(os.path.join(tools_dir, 'KRFKeyExtractor.exe'))
 
-
-    for p in candidates:
+    result = []
+    for name in ('KFXKeyExtractor28.exe', 'MSIXKFXArchiver.exe', 'KRFKeyExtractor.exe'):
+        p = os.path.join(tools_dir, name)
         if os.path.isfile(p):
-            return p
-    return None
+            result.append((name, p))
+    return result
 
 
 def _find_kindle_content_dir():
@@ -128,19 +126,23 @@ class KeyScanWorker(QThread):
         except ImportError as e:
             self._log(f'  kindlekey module not available: {e}')
 
-        # 2. Auto-run KFX extractor if available
-        extractor = _find_extractor()
+        # 2. Auto-run KFX extractors if available
+        extractors = _find_extractors()
         content_dir = _find_kindle_content_dir()
 
-        if extractor and content_dir:
-            self._log(f'  Running extractor: {os.path.basename(extractor)}')
-            self._log(f'  Kindle content: {content_dir}')
-            extractor_keys = self._run_extractor(extractor, content_dir)
-            keys.extend(extractor_keys)
-        elif extractor and not content_dir:
-            self._log(f'  Extractor found but Kindle content dir not detected')
-        elif content_dir and not extractor:
-            self._log(f'  Kindle content found but extractor not available')
+        if extractors and content_dir:
+            for ext_name, ext_path in extractors:
+                self._log(f'  Running extractor: {ext_name}')
+                self._log(f'  Kindle content: {content_dir}')
+                extractor_keys = self._run_extractor(ext_path, content_dir)
+                if extractor_keys:
+                    keys.extend(extractor_keys)
+                    break
+                self._log(f'  (no keys from {ext_name}, trying next...)')
+        elif extractors and not content_dir:
+            self._log(f'  Extractor(s) found but Kindle content dir not detected')
+        elif content_dir and not extractors:
+            self._log(f'  Kindle content found but no extractor available')
 
         # 2b. Optional: Frida-based live extraction (if installed)
         if not keys:

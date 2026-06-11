@@ -25,3 +25,25 @@ __pycache__/
 # Local config (contains user keys — NEVER commit)
 *.json
 !**/package.json
+
+# Extracted keys and temporary files
+*.k4i
+*.kfxkey
+kfxkey
+keyfile
+keyfile.k4i
+oldbooks.k4i
+kindle_account.k4i
+
+# MSIXKFXArchiver output
+/Data/
+archived_kfx/
+*_EBOK/
+*.dmp
+*.voucher
+decrypted_registration_data.dat
+storage_dump.bin
+
+# Compiled tools (not tracked — built from source)
+Other_Tools/KRFKeyExtractor/*.exe
+Other_Tools/KRFKeyExtractor/*.obj
