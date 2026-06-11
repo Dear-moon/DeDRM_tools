@@ -130,18 +130,27 @@ class KeyScanWorker(QThread):
         extractors = _find_extractors()
         content_dir = _find_kindle_content_dir()
 
-        if extractors and content_dir:
+        if extractors:
             for ext_name, ext_path in extractors:
-                self._log(f'  Running extractor: {ext_name}')
-                self._log(f'  Kindle content: {content_dir}')
-                extractor_keys = self._run_extractor(ext_path, content_dir)
+                if ext_name.startswith('MSIX'):
+                    # MSIXKFXArchiver: auto-detects dirs, can run without args
+                    self._log(f'  Running extractor: {ext_name}')
+                    extractor_keys = self._run_msix_extractor(ext_path)
+                else:
+                    # KFXKeyExtractor28 / KRFKeyExtractor: needs content dir
+                    if not content_dir:
+                        if extractors and ext_name == extractors[-1][0]:
+                            self._log(f'  Kindle content dir not detected, skipping {ext_name}')
+                        continue
+                    self._log(f'  Running extractor: {ext_name}')
+                    self._log(f'  Kindle content: {content_dir}')
+                    extractor_keys = self._run_extractor(ext_path, content_dir)
+
                 if extractor_keys:
                     keys.extend(extractor_keys)
                     break
                 self._log(f'  (no keys from {ext_name}, trying next...)')
-        elif extractors and not content_dir:
-            self._log(f'  Extractor(s) found but Kindle content dir not detected')
-        elif content_dir and not extractors:
+        elif content_dir:
             self._log(f'  Kindle content found but no extractor available')
 
         # 2b. Optional: Frida-based live extraction (if installed)
@@ -286,6 +295,78 @@ class KeyScanWorker(QThread):
             self._log('  Frida extraction timed out (is Kindle running?)')
         except Exception as e:
             self._log(f'  Frida extraction error: {e}')
+
+        return keys
+
+    def _run_msix_extractor(self, extractor_path):
+        """Run MSIXKFXArchiver (MS Store / UWP Kindle) and return extracted keys."""
+        keys = []
+        tmpdir = tempfile.mkdtemp(prefix='dedrm_msix_')
+        try:
+            creationflags = 0
+            if sys.platform.startswith('win'):
+                creationflags = 0x08000000  # CREATE_NO_WINDOW
+            proc = subprocess.run(
+                [extractor_path],
+                cwd=tmpdir,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                creationflags=creationflags,
+            )
+            self._log(f'  MSIXKFXArchiver returned code {proc.returncode}')
+
+            # Parse DSN from stdout
+            import re
+            dsn_match = re.search(r'DSN:\s*"([0-9a-fA-F]+)"', proc.stdout)
+            if dsn_match:
+                dsn = dsn_match.group(1)
+                self._log(f'  Extracted DSN: {dsn}')
+
+            # Look for k4i file
+            for fname in ['oldbooks.k4i', 'kindle_account.k4i', 'k4ikey.k4i']:
+                k4i_path = os.path.join(tmpdir, fname)
+                if os.path.isfile(k4i_path):
+                    try:
+                        with open(k4i_path, 'r', encoding='utf-8') as f:
+                            key_data = json.load(f)
+                        if key_data:
+                            keys.append(json.dumps(key_data))
+                            self._log(f'  Loaded Kindle key from {fname}')
+                            break
+                    except Exception:
+                        pass
+
+            # Also check archived_kfx subfolder for k4i
+            archived = os.path.join(tmpdir, 'archived_kfx')
+            if os.path.isdir(archived):
+                for fname in os.listdir(archived):
+                    if fname.endswith('.k4i'):
+                        k4i_path = os.path.join(archived, fname)
+                        try:
+                            with open(k4i_path, 'r', encoding='utf-8') as f:
+                                key_data = json.load(f)
+                            if key_data:
+                                keys.append(json.dumps(key_data))
+                                self._log(f'  Loaded key from archived_kfx/{fname}')
+                        except Exception:
+                            pass
+
+            # Check for voucher data in stdout
+            for line in proc.stdout.split('\n') + proc.stderr.split('\n'):
+                if 'Token' in line or 'secret' in line.lower():
+                    self._log(f'  {line.strip()[:120]}')
+
+        except subprocess.TimeoutExpired:
+            self._log('  MSIXKFXArchiver timed out (UWP app running?)')
+        except Exception as e:
+            self._log(f'  MSIXKFXArchiver error: {e}')
+        finally:
+            try:
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            except Exception:
+                pass
 
         return keys
 
