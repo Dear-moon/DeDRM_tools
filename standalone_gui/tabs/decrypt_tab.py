@@ -130,9 +130,7 @@ class DecryptTab(QWidget):
                     for name in zf.namelist():
                         with zf.open(name) as sf:
                             if sf.read(4) == b'CONT':
-                                self.info_label.setText('KFX CONT container — use Calibre + KFX Input plugin')
-                                self.decrypt_btn.setEnabled(False)
-                                return
+                                ftype = 'KFX_CONT'
             except Exception:
                 pass
 
@@ -148,11 +146,15 @@ class DecryptTab(QWidget):
         # Auto-set output
         if not self.output_edit.text():
             base, ext = os.path.splitext(inpath)
+            if ftype and 'CONT' in str(ftype):
+                ext = '.epub'
             self.output_edit.setText(base + '_nodrm' + ext)
 
     def _sniff(self, header, filepath):
         if header.startswith(b'%PDF'):
             return 'PDF'
+        if header.startswith(b'CONT'):
+            return 'KFX CONT container (will convert via kfxlib)'
         if header.startswith(b'\xeaDRMION\xee'):
             parent = os.path.dirname(filepath)
             try:

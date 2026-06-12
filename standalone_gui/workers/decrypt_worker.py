@@ -72,6 +72,10 @@ class DecryptWorker(QThread):
                     pass
             return None  # No voucher available
 
+        # KFX CONT container
+        if header.startswith(b'CONT'):
+            return 'KFX_CONT'
+
         if header.startswith(MAGIC_TPZ):
             return 'TPZ'
 
@@ -90,13 +94,16 @@ class DecryptWorker(QThread):
                 if ineptepub.isPassHashBook(filepath):
                     return 'ADEPT-PassHash'
                 return 'ADEPT'
-            # Check for KFX-ZIP
+            # Check for KFX-ZIP (DRMION format)
             try:
                 with closing(ZipFile(open(filepath, 'rb'))) as zf:
                     for name in zf.namelist():
                         with zf.open(name) as sf:
-                            if sf.read(8) == MAGIC_DRMION:
+                            hdr8 = sf.read(8)
+                            if hdr8 == MAGIC_DRMION:
                                 return 'KFX-ZIP'
+                            if hdr8[:4] == b'CONT':
+                                return 'KFX_CONT'
             except Exception:
                 pass
             return 'ZIP'
@@ -128,6 +135,8 @@ class DecryptWorker(QThread):
                 success = self._decrypt_kindle_mobi()
             elif ftype == 'KFX_RAW':
                 success = self._decrypt_kindle_kfx_from_raw()
+            elif ftype == 'KFX_CONT':
+                success = self._decrypt_kfx_cont()
             elif ftype in ('ADEPT', 'ADEPT-PassHash'):
                 success = self._decrypt_adobe_epub()
             elif ftype == 'LCP':
@@ -350,6 +359,26 @@ class DecryptWorker(QThread):
             return True
         except Exception as e:
             self._log(f'KFX decryption failed: {e}')
+            return False
+
+    # --- KFX CONT container (MS Store / MSIXKFXArchiver output) ---
+
+    def _decrypt_kfx_cont(self):
+        """Handle KFX CONT container format using standalone kfxlib (zero Calibre deps)."""
+        self._log('KFX CONT container detected')
+        try:
+            from DeDRM_plugin.kfxlib_standalone import convert_kfx_to_epub
+            self._log('Converting KFX CONT to EPUB via kfxlib (standalone)...')
+            convert_kfx_to_epub(self.input_path, self.output_path)
+            if os.path.isfile(self.output_path) and os.path.getsize(self.output_path) > 0:
+                self._log('KFX CONT conversion succeeded!')
+                return True
+            self._log('Conversion produced no output')
+            return False
+        except Exception as e:
+            self._log(f'Standalone conversion failed: {e}')
+            self._log('The file may still be DRM-encrypted.')
+            self._log('Use MSIXKFXArchiver.exe to extract decrypted files first.')
             return False
 
     # --- Adobe EPUB ---

@@ -1,6 +1,6 @@
 # DeDRM Standalone GUI
 
-One-click DRM removal for Kindle / Adobe / B&N / LCP ebooks. **No Calibre required.** Drag, drop, decrypt.
+One-click DRM removal for Kindle / Adobe / B&N / LCP ebooks. **No Calibre required. Drag, drop, decrypt.**
 
 ## Quick Start
 
@@ -8,101 +8,93 @@ One-click DRM removal for Kindle / Adobe / B&N / LCP ebooks. **No Calibre requir
 2. Double-click to launch
 3. Drag your encrypted ebook into the window → click **Decrypt**
 
-First-time use requires key extraction (see below).
+First use: click **Refresh Keys** once (auto-extracts keys from installed Kindle/ADE apps).
 
 ## Supported Formats
 
-| Source | DRM Scheme | Formats | GUI Support |
-|--------|-----------|---------|-------------|
-| Kindle for PC (traditional installer) | KFX/KF8/Mobi/Topaz | `.azw` `.azw3` `.mobi` | Full |
-| Kindle for PC 2.8+ (separated KFX) | KFX + external voucher | `.azw` + `.voucher` + `.res` | Full (auto-wrap) |
-| Kindle e-ink (Paperwhite / Oasis) | KFX device-bound | `.kfx` | Full (serial number) |
-| Kindle UWP / Microsoft Store | KFX with CLIENT_ID voucher | CONT `.azw` | **See below** |
-| Amazon "Download & transfer via USB" | Mobi/KF8 | `.azw3` | Full |
-| Adobe Digital Editions | ADEPT | `.epub` `.pdf` | Full |
-| B&N / Nook | PassHash | `.epub` | Full |
-| Readium LCP | LCP (basic + profile-1.0) | `.epub` | Full |
+| Source | Format | Handler | Output |
+|--------|--------|---------|--------|
+| Kindle for PC (traditional) | `.azw` `.azw3` `.mobi` | `mobidedrm` / `kfxdedrm` | `.azw3` |
+| Kindle for PC 2.8+ (separated) | `.azw` + `.voucher` + `.res` | auto-wrap → `kfxdedrm` | `.azw3` |
+| Kindle e-ink (Paperwhite/Oasis) | `.kfx` + `assets/voucher` | recursive auto-wrap → `k4mobidedrm` | `.azw3` |
+| Kindle UWP / MS Store | `.kfx-zip` (CONT container) | **`kfxlib` (zero deps)** | `.epub` |
+| Amazon "Download & transfer via USB" | `.azw3` | `mobidedrm` | `.azw3` |
+| Adobe Digital Editions | `.epub` `.pdf` | `ineptepub` / `ineptpdf` | `.epub` / `.pdf` |
+| B&N / Nook | `.epub` | `ineptepub` (PassHash) | `.epub` |
+| Readium LCP | `.epub` | `lcpdedrm` | `.epub` |
 
-### Kindle UWP / Microsoft Store
-
-The Microsoft Store version of Kindle uses **CLIENT_ID-locked vouchers** protected by TPM. These cannot be statically decrypted.
-
-**Workflow**:
-1. Run `standalone_gui\tools\MSIXKFXArchiver.exe` (bundled)
-2. It hooks the running Kindle process to decrypt books in real-time
-3. Output: `.kfx-zip` files (CONT container format, already decrypted) + `oldbooks.k4i`
-4. Import the `.kfx-zip` into **Calibre with the KFX Input plugin** to convert to EPUB
-5. Drag `oldbooks.k4i` into the GUI for use with traditional K4PC books
-
-The GUI will detect CONT-format files and show a helpful message.
-
-## Usage
+## Workflows
 
 ### Kindle for PC (traditional installer)
 
-**1. Extract keys** — Click **Refresh Keys** on the Decrypt Tab:
-- Auto-scans local Kindle for PC registry
-- Auto-runs the bundled key extractors (`KFXKeyExtractor28.exe` or `MSIXKFXArchiver.exe`)
-- Shows import summary
+Click **Refresh Keys** — auto-scans registry, runs `KFXKeyExtractor28.exe`. Then drag `.azw` → Decrypt.
 
-Or manually:
-```cmd
-cd standalone_gui\tools
-KFXKeyExtractor28.exe "%USERPROFILE%\Documents\My Kindle Content" kfxkey k4ikey.k4i
-```
-Then drag the generated `kfxkey` and `k4ikey.k4i` into the GUI window.
+### Kindle UWP / Microsoft Store
 
-**2. Decrypt** — Drag the `.azw` file (from `Documents\My Kindle Content\B0XXX_EBOK\`) into the window. File type is auto-detected. Click **Decrypt**.
+Click **Refresh Keys** — auto-runs `MSIXKFXArchiver.exe` (hooks running Kindle process, needs ~400MB temp space). Output `.kfx-zip` can be dragged in directly for **zero-dependency** CONT→EPUB conversion via bundled `kfxlib`.
 
-### Kindle e-ink (Paperwhite / Oasis etc.)
+### Kindle e-ink device
 
-**1. Enter serial number** — In the **Serials & PIDs Tab**, enter your Kindle device serial number (find it at Amazon → Manage Your Devices, format like `G090 XXXX XXXX XXXX`).
-
-**2. Copy book folder** — Connect your Kindle via USB and copy the entire book folder (e.g. `Documents/BookTitle_B07XXX.sdr/`) to your PC.
-
-**3. Decrypt** — Drag the `.kfx` file from the folder into the window. Companion files in subdirectories (`assets/voucher`, etc.) are auto-detected and packaged recursively. Click **Decrypt**.
+Enter serial in **Serials & PIDs Tab**. Copy book folder from device via USB. Drag `.kfx` — auto-detects `assets/voucher` recursively.
 
 ### Adobe / B&N / LCP
 
-Import your keys or enter your passphrase in the corresponding tab, then drag in `.epub` / `.pdf` files to decrypt.
+Use **Adobe Keys** / **B&N Keys** tabs to scan or import keys. Drag `.epub`/`.pdf` → Decrypt.
+
+## Key Extraction (Refresh Keys)
+
+```
+① kindlekey.kindlekeys()      ← Registry scan (K4PC traditional)
+② KFXKeyExtractor28.exe       ← Memory extraction (Kindle 2.8+)
+③ MSIXKFXArchiver.exe         ← TPM + Hook (UWP/MS Store)
+④ Frida (optional)            ← pip install frida frida-tools
+```
+
+Collected keys are automatically de-duplicated and imported.
 
 ## Drag & Drop
 
-Drop any supported file onto the window — it's routed automatically:
-
 | File | Action |
 |------|--------|
-| `.azw` `.epub` `.pdf` `.kfx` `.mobi` etc. | Load into Decrypt Tab |
-| `.k4i` | Import as Kindle account key |
-| `.der` | Import as Adobe ADE key |
-| `.b64` | Import as B&N key |
-| `kfxkey` / `keyfile` (no extension) | Set as KFX voucher key file |
+| `.azw` `.epub` `.pdf` `.kfx` `.mobi` `.kfx-zip` | Load into Decrypt Tab |
+| `.k4i` | Import Kindle account key |
+| `.der` | Import Adobe ADE key |
+| `.b64` | Import B&N key |
+| `kfxkey` / `keyfile` (no extension) | Set KFX voucher key file |
 
 ## Tabs
 
 | Tab | Purpose |
 |-----|---------|
-| **Decrypt** | File selection, type detection, decryption, log, Refresh Keys |
-| **Kindle Keys** | Scan/import K4PC keys, manual serial/PID entry |
-| **Adobe Keys** | Scan/import ADE keys, PDF password management |
+| **Decrypt** | File input, type detection, decrypt, log, Refresh Keys |
+| **Kindle Keys** | Scan/import K4PC keys, manual serial/PID |
+| **Adobe Keys** | Scan/import ADE keys, PDF passwords |
 | **B&N Keys** | Scan/generate Nook PassHash keys |
 | **Serials & PIDs** | Kindle serial numbers, eReader PIDs |
 | **Settings** | Font deobfuscation, watermark removal, KFX voucher path |
 
-## Bundled Tools
+## Architecture
 
-Located in `standalone_gui/tools/`:
+```
+standalone_gui/
+├── main.py              ← Entry point
+├── compat.py             ← DeDRM import bootstrap
+├── app_config.py         ← JSON config manager
+├── main_window.py        ← QMainWindow + drag-drop
+├── tabs/                 ← 6 tab widgets
+├── workers/              ← QThread decrypt + key scan
+└── tools/                ← KFXKeyExtractor28.exe + MSIXKFXArchiver.exe
 
-| Tool | Purpose |
-|------|---------|
-| `KFXKeyExtractor28.exe` | Extract keys from Kindle for PC 2.8.0+ (traditional installer) |
-| `MSIXKFXArchiver.exe` | Extract/decrypt books from Kindle UWP (Microsoft Store) |
-| `kindleFridaInstr.py` | Optional Frida-based live key extraction |
+DeDRM_plugin/
+├── kfxlib/               ← CONT container parser (35 files, zero Calibre deps)
+├── kfxlib_standalone.py  ← Calibre stub injection → YJ_Book → EPUB
+├── (original DeDRM code unchanged)
+```
 
 ## Run from Source
 
 ```bash
-pip install pycryptodome lxml PyQt6 legacy-cgi
+pip install pycryptodome lxml PyQt6
 python standalone_gui/main.py
 ```
 
@@ -111,22 +103,19 @@ python standalone_gui/main.py
 ```bash
 pip install pyinstaller
 pyinstaller dedrm_gui.spec
-# Output → dist/DeDRM_GUI.exe
+# → dist/DeDRM_GUI.exe
 ```
 
-To compile `MSIXKFXArchiver.exe` from source:
+To compile `MSIXKFXArchiver.exe` (requires VS 2022 BuildTools):
 ```bash
 python Other_Tools/KRFKeyExtractor/compile_msix.py
-# Requires Visual Studio 2022 Build Tools with Windows SDK
-# Output → Other_Tools/KRFKeyExtractor/MSIXKFXArchiver.exe
 ```
 
 ## Credits
 
-Based on the following open-source projects:
-
 - [noDRM/DeDRM_tools](https://github.com/noDRM/DeDRM_tools) — Calibre DeDRM plugin
 - [Satsuoni/DeDRM_tools](https://github.com/Satsuoni/DeDRM_tools) — maintained fork
+- KFX Input plugin by John Howell (`kfxlib/`) — CONT container parsing
 - Apprentice Harper, Apprentice Alf — original DeDRM tools
 - The Dark Reverser — MobiDeDRM
 - i♥cabbages — Adobe ADEPT scripts
