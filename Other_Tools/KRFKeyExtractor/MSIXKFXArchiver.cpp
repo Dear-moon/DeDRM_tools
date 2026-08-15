@@ -596,7 +596,7 @@ std::vector<char> ReadFileToVector(const fs::path& filePath)
 
     std::ifstream file(filePath, std::ios::in | std::ios::binary);
     if (!file.is_open()) {
-        std::cout << "Could not open" << strerror(errno) << std::endl;
+        std::cout << "Could not open " << filePath << " with " << strerror(errno) << std::endl;
         return std::vector<char>();
     }
     return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -2247,7 +2247,17 @@ int finIndexIn(const std::vector<std::string>& p, const std::string& val)
 
 //--------------------------------------------------end ION
 
-
+struct ppatch
+{
+    int spatch = 0;
+    std::vector<BYTE> patch = { 0x66, 0xB8, 0x01, 0x00, 0xC3 };
+    std::vector<BYTE> unpatch;
+    ppatch(int sp,const  std::vector<BYTE>& ptch)
+    {
+        spatch = sp;
+        patch = ptch;
+    }
+};
 
 struct ExecOffsets
 {
@@ -2267,8 +2277,10 @@ struct ExecOffsets
     int mbox_size = 0;
     int mbox_iv_offset = 0;
     int allemaric_shift=0;
-    int spatch = 0;
+  //  int spatch = 0;
     std::string version = "unk ";
+    //std::vector<BYTE> patch = { 0x66, 0xB8, 0x01, 0x00, 0xC3 };
+    std::vector<ppatch> spatches;
     int vernum = -1;
 };
 
@@ -2283,8 +2295,8 @@ ExecOffsets KindleReader1_0_15230()
     ret.deobfuscate_storage= 0x1009b8d0;
 
     ret.get_storage_value = 0x1009c820;
-
-    ret.spatch= 0x10065a60;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
+    //ret.spatch= 0x10065a60;
     ret.get_plugin_man = 0x11057890;
     ret.load_all = 0x11057990;
 
@@ -2308,7 +2320,9 @@ ExecOffsets KindleReader1_0_16034()
 {
     ExecOffsets ret;
     ret.make_storage = 0x10dbf3c0;
-    ret.spatch = 0x10065a60;
+    //ret.spatch = ;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
+
     ret.luceneaddr = 0x11046b60;
     ret.entry = 0;
     ret.deobfuscate_storage = 0x1009b8d0;
@@ -2334,7 +2348,9 @@ ExecOffsets KindleReader1_0_16118()
     ret.deobfuscate_storage = 0x1009b8d0;
     ret.get_storage_value = 0x1009c820;
     ret.make_storage = 0x10dbf3c0;
-    ret.spatch = 0x10065a60;
+   // ret.spatch = 0x10065a60;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
+
     ret.luceneaddr = 0x11046b60;
     ret.get_plugin_man = 0x11057840;
     ret.load_all = 0x11057940;
@@ -2355,7 +2371,8 @@ ExecOffsets KindleReader1_0_18320()
     ExecOffsets ret;
     ret.make_storage = 0x10dbf770;
     ret.luceneaddr = 0x11047130;
-    ret.spatch = 0x10065a60;
+  //  ret.spatch = 0x10065a60;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
     ret.get_storage_value = 0x1009c870;
     ret.deobfuscate_storage = 0x1009b920;
     ret.get_plugin_man = 0x11057e10;
@@ -2381,7 +2398,8 @@ ExecOffsets KindleReader1_0_18632()
     ret.open_book = 0x110680a0;
     ret.luceneaddr = 0x11047130;
     ret.make_storage = 0x10dbf770;
-    ret.spatch = 0x10065a60;
+   // ret.spatch = 0x10065a60;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
     ret.get_storage_value = 0x1009c870;
     ret.deobfuscate_storage = 0x1009b920;
     ret.get_plugin_man = 0x11057e10;
@@ -2397,6 +2415,39 @@ ExecOffsets KindleReader1_0_18632()
     ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.18632";
     ret.vernum = 4;
    
+    ret.entry = 0;
+    return ret;
+}
+
+//7a7f3827c80e19a4ebda38c2853eb590
+ExecOffsets KindleReader1_0_22326()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x111498e0;
+    ret.make_storage = 0x10eca5f0;
+  //  ret.patch = { 0xe9, 0xd6, 0x00, 0x00, 0x00};// e9 df 00 00 00
+    //ret.spatch = 0x10eca624;
+    ret.spatches.push_back(ppatch(0x10eca624, { 0xe9, 0xd6, 0x00, 0x00, 0x00 }));
+    ret.spatches.push_back(ppatch(0x10eca054, { 0xe9, 0xf9, 0x00, 0x00, 0x00 }));
+   // ret.patch = { 0xe9, 0xf9, 0x00, 0x00, 0x00};// e9 df 00 00 00
+   // ret.spatch = 0x10eca054;
+
+
+    ret.get_storage_value = 0x1008ad10;
+    ret.deobfuscate_storage = 0x10089dc0;
+    ret.get_plugin_man = 0x1115a620;
+    ret.load_all = 0x1115a720;
+    ret.get_factory = 0x1116bd00;
+    ret.open_book = 0x1116bdd0;
+    ret.drm_provider = 0x1116c110;
+    ret.decr_offset = 0x11bb80a0;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.22326";
+    ret.vernum = 5;
+
     ret.entry = 0;
     return ret;
 }
@@ -2791,7 +2842,7 @@ bool tryAssignKey(BinaryIonParser* drmkey)
     return false;
 }
 
-
+bool afb = false;
 void freeFake(void* p)
 {
     if (armed && p != nullptr)
@@ -2811,10 +2862,31 @@ void freeFake(void* p)
 
             }
         }
+        if (afb)
+        {
+            for (const auto& a : allocations)
+            {
+                size_t sz = a.second;
+                uint8_t* ptr = (uint8_t*)a.first;
+                if (sz <= 64 && sz >= 41)
+                {
+                    if (allhex(ptr, 40)&&ptr[40]==0)
+                    {
+                        std::string cand = std::string((char*)ptr, 40);
+                        if (keydataAccumulator.old_secrets.find(cand) == keydataAccumulator.old_secrets.end())
+                        {
+                            std::cout << "Secret candidate: " << cand << std::endl;
+                            keydataAccumulator.old_secrets.insert(cand);
+                        }
+                    }
+                }
+            }
+        }
         if (fsize > 0)
         {
-          //  printf("Freeing %d at %p\n", fsize,p);
-          //  std::cout << hexStr((uint8_t*)p, fsize) << std::endl;
+           // printf("Freeing %d at %p\n", fsize,p);
+           // std::cout << hexStr((uint8_t*)p, fsize) << std::endl;
+            
         }
         if (p == seccan) seccan = nullptr;
         if (fsize >= 39)
@@ -2853,10 +2925,10 @@ void* memcpyFake(void* dst, void* src,size_t sz)
 {
     if (armed)
     {
-       // std::cout << "Caught memcpy of " << sz << "("<<allocations[src]<<") bytes, from " << src << " to " << dst <<"("<<allocations[dst]<<")"<< std::endl;
+        //std::cout << "Caught memcpy of " << sz << "("<<allocations[src]<<") bytes, from " << src << " to " << dst <<"("<<allocations[dst]<<")"<< std::endl;
         if (allhex((uint8_t*)src, sz)&&sz>10)
         {
-            //std::cout << "Allhex!" << std::endl;
+           // std::cout << "Allhex!" << std::endl;
             if (sz == 31 && allocations[dst] == 48)
             {
 
@@ -2865,7 +2937,7 @@ void* memcpyFake(void* dst, void* src,size_t sz)
                // PrintSimpleCallStack();
             }
         }
-        //std::cout << hexStr((uint8_t*)src, sz) << std::endl;
+     //   std::cout << hexStr((uint8_t*)src, sz) << std::endl;
     }
   
     void * ret = memcpy(dst, src, sz);
@@ -2879,24 +2951,26 @@ BOOL ConvertStringSecurityDescriptorToSecurityDescriptorWFake(LPCWSTR StringSecu
    std::wcout << "ConvertStringSecurityDescriptorToSecurityDescriptorWFake " << StringSecurityDescriptor << " revision " << StringSDRevision << std::endl;
    return  ConvertStringSecurityDescriptorToSecurityDescriptorW(StringSecurityDescriptor, StringSDRevision, SecurityDescriptor, SecurityDescriptorSize);
 }
-BYTE unpatchBytes[5];
-bool PatchWithMovAxRet() {
+//std::vector<BYTE> unpatchBytes;
 
-    BYTE* targetAddress = reinterpret_cast<BYTE*>(curOffs.spatch+globoffs);
+bool PatchWithMovAxRet(int offsetAddr,const std::vector<BYTE>& patch, std::vector<BYTE>& unpatch) {
+
+    BYTE* targetAddress = reinterpret_cast<BYTE*>(offsetAddr +globoffs); //curoffs.spatch
     DWORD oldProtect;
 
     // Raw instruction bytes: 
     // 66 B8 01 00 = mov ax, 0x1
     // C3          = ret
-    BYTE patchBytes[5] = {0x66, 0xB8, 0x01, 0x00, 0xC3};
-    size_t patchSize = sizeof(patchBytes);
 
+    size_t patchSize = patch.size();
+    unpatch.resize(patchSize);
+  //  printf("Target address: %p size %d\n", targetAddress, (int)patchSize);
     // 2. Modify memory page rights to read/write/execute
     if (VirtualProtect(targetAddress, patchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) {
 
         // 3. Apply the 5-byte instruction override sequence
-        memcpy(unpatchBytes, targetAddress, patchSize);
-        memcpy(targetAddress, patchBytes, patchSize);
+        memcpy(unpatch.data(), targetAddress, patchSize);
+        memcpy(targetAddress, patch.data(), patchSize);
 
         // 4. Restore original system memory protection states
         VirtualProtect(targetAddress, patchSize, oldProtect, &oldProtect);
@@ -2904,7 +2978,7 @@ bool PatchWithMovAxRet() {
         // 5. Clear CPU pipeline cache to prevent execution misalignment
         FlushInstructionCache(GetCurrentProcess(), targetAddress, patchSize);
 
-        std::cout << "[+] Successfully patched spatch" << std::endl;// with mov ax, 1; ret
+        std::cout << "[+] Successfully patched spatch with " << patchSize << " bytes "<< hexStr((uint8_t*)&unpatch[0], patchSize) << std::endl;// with mov ax, 1; ret
         return true;
     }
 
@@ -2912,18 +2986,19 @@ bool PatchWithMovAxRet() {
     return false;
 }
 
-bool UnpatchWithMovAxRet() {
+bool UnpatchWithMovAxRet(int offsetAddr, const std::vector<BYTE>& unpatch) {
     // 1. Identify target address location
-    BYTE* targetAddress = reinterpret_cast<BYTE*>(curOffs.spatch + globoffs);
+    BYTE* targetAddress = reinterpret_cast<BYTE*>(offsetAddr + globoffs);
     DWORD oldProtect;
-    size_t patchSize = sizeof(unpatchBytes);
+    size_t patchSize = unpatch.size();
 
     // 2. Modify memory page rights to read/write/execute
+   // printf("Target address: %p size %d\n", targetAddress,(int)patchSize);
     if (VirtualProtect(targetAddress, patchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) {
 
         // 3. Apply the 5-byte instruction override sequence
  
-        memcpy(targetAddress, unpatchBytes, patchSize);
+        memcpy(targetAddress, unpatch.data(), patchSize);
 
         // 4. Restore original system memory protection states
         VirtualProtect(targetAddress, patchSize, oldProtect, &oldProtect);
@@ -2931,14 +3006,32 @@ bool UnpatchWithMovAxRet() {
         // 5. Clear CPU pipeline cache to prevent execution misalignment
         FlushInstructionCache(GetCurrentProcess(), targetAddress, patchSize);
 
-        std::cout << "[+] Successfully unpatched spatch" << std::endl;
+        std::cout << "[+] Successfully unpatched " << std::endl;
         return true;
     }
 
     std::cout << "[-] VirtualProtect failed. Error code: " << GetLastError() << std::endl;
     return false;
 }
+bool patchAMove()
+{
 
+    for (auto& a : curOffs.spatches)
+    {
+        if (!PatchWithMovAxRet(a.spatch, a.patch, a.unpatch)) return false;
+    }
+    printf("PDone\n");
+    return true;
+ 
+}
+bool unpatchAMove()
+{
+    for (auto& a : curOffs.spatches)
+    {
+        if (!UnpatchWithMovAxRet(a.spatch, a.unpatch)) return false;
+    }
+    return true;
+}
 // Helper function to fetch raw property bytes from CNG
 bool GetKeyProperty(NCRYPT_KEY_HANDLE hKey, LPCWSTR pszProperty, std::vector<BYTE>& buffer) {
     DWORD cbResult = 0;
@@ -4320,6 +4413,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
         }
     }
     {
+        afb = true;
         fs::path fb_path_v = fbook / "fake.voucher";
         fs::path fb_path_a = fbook / "fake.azw";
         write_vector_to_file(fb_path_v, fake);
@@ -4339,6 +4433,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
             }
 
         }
+        afb = false;
     }
     do
     {
@@ -4711,6 +4806,11 @@ void degenerateCopyNeededFiles(const fs::path& from, const std::vector<std::stri
     fs::create_directories(to);
     for (auto fl : files)
     {
+        //if (!fs::exists(fl))
+        //{
+         //   std::cout << "File " << fl << " does not exist, skipping?" << std::endl;
+        //    continue;
+        //}
         degenerateCopyFile(from/fs::path(fl),to/fs::path(fl));
     }
 }
@@ -4744,7 +4844,7 @@ int wmain(int argc, wchar_t * argv[])
     supportMap["db8035b8f8673ec4c3247161b5f57ded"] = KindleReader1_0_16118();
     supportMap["2b13ee9cf40ebf26f3d14f4987b9b329"] = KindleReader1_0_18320();
     supportMap["a5af62fd27d6cf599575ba0c1c112985"] = KindleReader1_0_18632();
-
+    supportMap["7a7f3827c80e19a4ebda38c2853eb590"] = KindleReader1_0_22326();
 
     if (argc < 4)
     {
@@ -4829,7 +4929,10 @@ int wmain(int argc, wchar_t * argv[])
     GetCurrentDirectoryW(MAX_PATH, old_cwd);
     fs::path current_dir = fs::path(old_cwd);
     std::vector<std::string> storage_files = { ".kinf2024", "main_shared.blob", "main_shared.salt","main_shared.blob.sha256"};
-    std::vector<std::string> dll_files = { "CFLite.dll", "concrt140_app.dll", "d3dcompiler_47.dll", "dsx120.dll", "hermes.dll", "icudt46.dll", "icudt65.dll", "icuin46.dll", "icuin65.dll", "icuio65.dll", "icuuc46.dll", "icuuc65.dll", "JavaScriptCore.dll", "libcrypto-1_1.dll", "libEGL.dll", "libfsdk_win32.dll", "libGLESv2.dll", "libjpeg.dll", "libpngKRF.dll", "libssl-1_1.dll", "LibWebCore.dll", "libxml2.dll", "Microsoft.ReactNative.dll", "Microsoft.Web.WebView2.Core.dll", "msvcp100.dll", "msvcp120.dll", "msvcp140.dll", "msvcp140_1_app.dll", "msvcp140_2_app.dll", "msvcp140_app.dll", "msvcr100.dll", "msvcr120.dll", "opengl32sw.dll", "Picker.dll", "pthreadVC2.dll", "Qt5Core.dll", "Qt5Gui.dll", "Qt5Multimedia.dll", "Qt5MultimediaWidgets.dll", "Qt5Network.dll", "Qt5OpenGL.dll", "Qt5Positioning.dll", "Qt5PrintSupport.dll", "Qt5Qml.dll", "Qt5Script.dll", "Qt5Sensors.dll", "Qt5Sql.dll", "Qt5Svg.dll", "Qt5WebChannel.dll", "Qt5WebSockets.dll", "Qt5Widgets.dll", "Qt5WinExtras.dll", "Qt5Xml.dll", "ReactNativeAsyncStorage.dll", "RNSVG.dll", "vcamp140_app.dll", "vccorlib120.dll", "vccorlib140.dll", "vccorlib140_app.dll", "vcomp140_app.dll", "vcruntime140.dll", "vcruntime140_app.dll", "WebCoreViewer.dll", "WebView2Loader.dll", "xrm120.dll", "zlib.dll", "zlib1.dll" };
+    std::vector<std::string> dll_files = { "CFLite.dll", "concrt140_app.dll", "d3dcompiler_47.dll", "dsx120.dll", "hermes.dll", "icudt46.dll", "icudt65.dll", "icuin46.dll", "icuin65.dll", "icuio65.dll", "icuuc46.dll", "icuuc65.dll", "JavaScriptCore.dll", "libcrypto-1_1.dll", "libEGL.dll", "libfsdk_win32.dll", "libGLESv2.dll", "libjpeg.dll", "libpngKRF.dll", "libssl-1_1.dll", "LibWebCore.dll", "libxml2.dll", "Microsoft.ReactNative.dll", "Microsoft.Web.WebView2.Core.dll", "msvcp100.dll", "msvcp120.dll", "msvcp140.dll", "msvcp140_1_app.dll", "msvcp140_2_app.dll", "msvcp140_app.dll", "msvcr100.dll", "msvcr120.dll", "opengl32sw.dll", "Picker.dll", "pthreadVC2.dll", "Qt5Core.dll", "Qt5Gui.dll", 
+                                           "Qt5Multimedia.dll", "Qt5MultimediaWidgets.dll", "Qt5Network.dll", "Qt5OpenGL.dll", "Qt5Positioning.dll", "Qt5PrintSupport.dll", 
+                                           "Qt5Qml.dll", "Qt5Script.dll", "Qt5Sensors.dll", "Qt5Sql.dll", "Qt5Svg.dll", "Qt5WebChannel.dll", "Qt5WebSockets.dll", "Qt5Widgets.dll", "Qt5WinExtras.dll", "Qt5Xml.dll", "ReactNativeAsyncStorage.dll", "RNSVG.dll", "vcamp140_app.dll", "vccorlib120.dll", "vccorlib140.dll", "vccorlib140_app.dll", "vcomp140_app.dll", "vcruntime140.dll", "vcruntime140_app.dll", "WebCoreViewer.dll", "WebView2Loader.dll", "xrm120.dll", 
+                                           "zlib.dll", "zlib1.dll","libpng16.dll"};
 
     // Check if the function call was successful.
     if (!SUCCEEDED(hr))
@@ -4906,7 +5009,7 @@ int wmain(int argc, wchar_t * argv[])
     }
     SetDllDirectoryW(load_path.wstring().c_str());
     std::wcout << "Success"  << std::endl;
-   
+    
     //debug...
     /*
     correctLatin1 = (fakeQLatin1)GetProcAddress(hlq, "?toLatin1@QString@@QGBE?AVQByteArray@@XZ");
@@ -4989,7 +5092,13 @@ int wmain(int argc, wchar_t * argv[])
    
     GetModuleFileNameA(hl, &buffer[0], buffer.size());
     std::cout << "Loaded dsx120 lib from: " << std::string(&buffer[0]) <<  std::endl;
-    std::cout << "Going back to cwd " << SetCurrentDirectoryW(current_dir.wstring().c_str())<<std::endl;
+    std::wcout << "Trying to move to " << data_folder << std::endl;
+    res = SetCurrentDirectoryW(data_folder.wstring().c_str());
+    if (!res)
+    {
+        std::wcout << "Move to data folder failed..." << std::endl;
+        return -3;
+    }
     void* plucene = GetProcAddress(hl, "?addFontDir@FontSetup@fontaccess@yj@@SAXV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
     printf("Lucene %p\n", plucene);
     if (plucene == NULL)
@@ -5000,8 +5109,12 @@ int wmain(int argc, wchar_t * argv[])
     int stoffset = (int)plucene - curOffs.luceneaddr;
     globoffs = stoffset;
     vpcall MakeKindleInfoStorage = (vpcall)(stoffset + curOffs.make_storage);
-    PatchWithMovAxRet();
+
+    patchAMove();
+
     void* kinfo = MakeKindleInfoStorage();
+
+
     printf("Kindle storage is %p\n", (void*)kinfo);
     if (kinfo == nullptr)
     {
@@ -5015,6 +5128,7 @@ int wmain(int argc, wchar_t * argv[])
     std::cout << "Storage hdata: "  << hdata->numBuckets << " nodesize: " << hdata->nodeSize <<" amount: "<< hdata->size << std::endl;
     std::map<std::string, std::string> strmap = QHashToMD5Map(hdata);
     std::string strtokens = strmap["495631f2946141093a7e333b85fa1a3d"];
+    std::cout << "Going back to cwd " << SetCurrentDirectoryW(current_dir.wstring().c_str()) << std::endl;
     /*toQString toQ = (toQString)GetProcAddress(hlq, "?fromStdString@QString@@SA?AV1@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
     fromQString fromQ = (fromQString)GetProcAddress(hlq, "?toStdString@QString@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
     if (strtokens.empty())
@@ -5036,7 +5150,8 @@ int wmain(int argc, wchar_t * argv[])
         return -5;
     }
     std::list<std::string> secrets = splitStringBySubstring(strtokens, ",");
-    UnpatchWithMovAxRet();
+    unpatchAMove();
+
     getPluginManager get_pm = (getPluginManager)(stoffset + curOffs.get_plugin_man);
     loadAllStaticModules load_pm = (loadAllStaticModules)(stoffset + curOffs.load_all);
     void* pm = get_pm();
