@@ -2452,6 +2452,36 @@ ExecOffsets KindleReader1_0_22326()
     return ret;
 }
 
+//5deec17cc97e250f1954a0c4b2c86005
+ExecOffsets KindleReader1_0_22920()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x111498e0;
+    ret.make_storage = 0x10eca5f0;
+    //  ret.patch = { 0xe9, 0xd6, 0x00, 0x00, 0x00};// e9 df 00 00 00
+      //ret.spatch = 0x10eca624;
+    ret.spatches.push_back(ppatch(0x10eca624, { 0xe9, 0xd6, 0x00, 0x00, 0x00 }));
+    ret.spatches.push_back(ppatch(0x10eca054, { 0xe9, 0xf9, 0x00, 0x00, 0x00 }));
+    ret.get_storage_value = 0x1008ad10;
+    ret.deobfuscate_storage = 0x10089dc0;
+    ret.get_plugin_man = 0x1115a620;
+    ret.load_all = 0x1115a720;
+    ret.get_factory = 0x1116bd00;
+    ret.open_book = 0x1116bdd0;
+    ret.drm_provider = 0x1116c110;
+
+
+    ret.decr_offset = 0x11bb80a0;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.22920";
+    ret.vernum = 5;
+
+    ret.entry = 0;
+    return ret;
+}
 struct IATRESULTS
 {
     enum class FAILUREREASON
@@ -4845,7 +4875,9 @@ int wmain(int argc, wchar_t * argv[])
     supportMap["2b13ee9cf40ebf26f3d14f4987b9b329"] = KindleReader1_0_18320();
     supportMap["a5af62fd27d6cf599575ba0c1c112985"] = KindleReader1_0_18632();
     supportMap["7a7f3827c80e19a4ebda38c2853eb590"] = KindleReader1_0_22326();
+    supportMap["5deec17cc97e250f1954a0c4b2c86005"] = KindleReader1_0_22920();
 
+   
     if (argc < 4)
     {
         std::cout << "Usage: executable [kindle documents path (with _EBOK folders)] [output folder] [output k4i file] [folder with dlls(KatxopoApp)] [k4i file, k4i file...]-> all parameters optional" << std::endl;
