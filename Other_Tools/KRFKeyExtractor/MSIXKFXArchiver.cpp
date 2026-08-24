@@ -183,6 +183,17 @@ std::vector<uint8_t> HexToBytes(const std::string& hex) {
 
     return bytes;
 }
+std::vector<char> HexToBytesC(const std::string& hex) {
+    std::vector<char> bytes;
+
+    for (unsigned int i = 0; i < hex.length(); i += 2) {
+        std::string byteString = hex.substr(i, 2);
+        uint8_t byte = (uint8_t)strtol(byteString.c_str(), NULL, 16);
+        bytes.push_back(byte);
+    }
+
+    return bytes;
+}
 
 std::string CalculateMD5(const std::wstring& filePath) 
 {
@@ -240,9 +251,339 @@ std::string CalculateMD5(const std::wstring& filePath)
     return md5String;
 }
 
+//BCRYPT_MD5_ALGORITHM,BCRYPT_SHA256_ALGORITHM,BCRYPT_SHA1_ALGORITHM
+std::vector<char> CalculateHashVector(const std::vector<char>& data,LPCWSTR algid)
+{
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    std::vector<char> ret;
+
+    // 2. Open the algorithm provider
+    if (BCryptOpenAlgorithmProvider(&hAlg, algid, nullptr, 0) != 0)
+    {
+        std::cout<< "Error: BCryptOpenAlgorithmProvider failed.";
+        return ret;
+    }
+
+    // 3. Create the hash object
+    if (BCryptCreateHash(hAlg, &hHash, nullptr, 0, nullptr, 0, 0) != 0) {
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        std::cout<< "Error: BCryptCreateHash failed.";
+    }
+    DWORD hashLength = 0;
+    ULONG resultLength = 0;
+
+    // hAlg is the handle returned by BCryptOpenAlgorithmProvider
+    NTSTATUS status = BCryptGetProperty(
+        hAlg,
+        BCRYPT_HASH_LENGTH,
+        (PBYTE)&hashLength,
+        sizeof(hashLength),
+        &resultLength,
+        0
+    );
+
+    if (!NT_SUCCESS(status)) 
+    {
+        std::cout << "Could not get alg len" << std::endl;
+        return ret;
+    }
+    if (BCryptHashData(hHash, (PUCHAR)data.data(), data.size(), 0) != 0)
+    {
+        BCryptDestroyHash(hHash);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        std::cout<< "Error: BCryptHashData failed.";
+        return ret;
+    }
+
+    // 4. Read file in chunks and stream to the hash object
+   
+    // 5. Finalize the hash computation
+    std::vector<char> hashResult(hashLength);
+    if (BCryptFinishHash(hHash,(PUCHAR) hashResult.data(), hashLength, 0) == 0) {
+        // 6. Convert the raw bytes to a hexadecimal string
+        ret= hashResult;
+    }
+    else {
+        std::cout<< "Error: BCryptFinishHash failed.";
+    }
+
+    // Cleanup CNG resources
+    BCryptDestroyHash(hHash);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+
+    return ret;
+}
+std::vector<UCHAR>  DeriveKeyPBKDF2(const std::string& password, const std::string& salt, ULONG iterations)
+{
+    // Specify the algorithm (e.g., BCRYPT_SHA256_ALGORITHM)
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA1_ALGORITHM, NULL, 0) != 0) {
+        std::cerr << "Failed to open algorithm provider.\n";
+        return  std::vector<UCHAR>();
+    }
+
+    // Set up buffers
+    std::vector<UCHAR> pbPassword(password.begin(), password.end());
+    std::vector<UCHAR> pbSalt(salt.begin(), salt.end());
+
+    // Output buffer for the derived key (e.g., 32 bytes)
+    DWORD cbDerivedKey = 32;
+    std::vector<UCHAR> pbDerivedKey(cbDerivedKey);
+
+    // Derive the key
+    NTSTATUS status = BCryptDeriveKeyPBKDF2(
+        hAlg,
+        pbPassword.data(), (ULONG)pbPassword.size(),
+        pbSalt.data(), (ULONG)pbSalt.size(),
+        iterations,
+        pbDerivedKey.data(), cbDerivedKey,
+        0
+    );
+
+    if (status == 0) { // 0 indicates STATUS_SUCCESS
+        std::cout << "Derived Key (Hex): ";
+        for (UCHAR byte : pbDerivedKey) {
+            printf("%02X", byte);
+        }
+        std::cout << "\n";
+    }
+    else {
+        std::cerr << "PBKDF2 Derivation failed with code: " << status << "\n";
+    }
+
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    return pbDerivedKey;
+}
+
+class CRC32 {
+private:
+    uint32_t table[256];
+
+public:
+    CRC32() {
+        uint32_t polynomial = 0xEDB88320;
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t crc = i;
+            for (uint32_t j = 0; j < 8; j++) {
+                if (crc & 1) {
+                    crc = (crc >> 1) ^ polynomial;
+                }
+                else {
+                    crc >>= 1;
+                }
+            }
+            table[i] = crc;
+        }
+    }
+
+    uint32_t Calculate(const uint8_t* data, size_t length) {
+        uint32_t crc = 0;// 0xFFFFFFFF; // Initial value
+        for (size_t i = 0; i < length; ++i) {
+            uint8_t index = (crc ^ data[i]) & 0xFF;
+            crc = (crc >> 8) ^ table[index];
+        }
+        return crc;// ^ 0xFFFFFFFF; // Final XOR
+    }
+};
+
+std::string charMap1 = "n5Pr6St7Uv8Wx9YzAb0Cd1Ef2Gh3Jk4M";
+std::string charMap3 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+std::string charMap4 = "ABCDEFGHIJKLMNPQRSTUVWXYZ123456789";
+
+std::string encodeToMap(const std::vector<char>& data,const std::string& smap)
+{
+    std::ostringstream s;
+    size_t l = smap.size();
+    for (auto val : data)
+    {
+        int Q = (val ^ 0x80) / l;
+        int R = (val) % l;
+        s << smap[Q] << smap[R];
+    }
+    return s.str();
+}
+std::string encodeHashToMap(const std::vector<char>& data, const std::string& smap)
+{
+    return encodeToMap(CalculateHashVector(data, BCRYPT_MD5_ALGORITHM), smap);
+}
+
+char getTwoBitsFromBitField(const std::vector<char>& bitField, int offset)
+{
+    int byteNumber = offset / 4;
+    int bitPosition = 6 - 2 * (offset % 4);
+    return bitField[byteNumber] >> bitPosition & 3;
+}
+
+char getSixBitsFromBitField(const std::vector<char>& bitField, int offset)
+{
+    offset *= 3;
+    char value = value = (getTwoBitsFromBitField(bitField, offset) << 4) + (getTwoBitsFromBitField(bitField, offset + 1) << 2) + getTwoBitsFromBitField(bitField, offset + 2);
+    return value;
+}
+
+std::string encodePID(const std::vector<char>& hash)
+{
+    std::ostringstream s;
+    for (int pos = 0; pos < 8; pos++)
+    {
+        s << charMap3[getSixBitsFromBitField(hash, pos)];
+    }
+    return s.str();
+}
+
+std::vector<uint32_t> generatePidEncryptionTable()
+{
+    std::vector<uint32_t> ret;
+    ret.reserve(0x100);
+    for (uint32_t counter1 = 0; counter1 < 0x100; counter1++)
+    {
+        uint32_t value = counter1;
+        for (uint32_t counter2 = 0; counter2 < 8; counter2++)
+        {
+            if ((value & 1) == 0)
+            {
+                value >>= 1;
+            }
+            else
+            {
+                value >>= 1;
+                value = value ^ 0xEDB88320;
+            }
+        }
+        ret.push_back(value);
+
+    }
+    return ret;
+}
+
+uint32_t generatePidSeed(const std::vector<uint32_t>& table,const std::string& dsn)
+{
+    uint32_t value = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        int index = (dsn[i] ^ value) & 0xff;
+        value = (value >> 8) ^ table[index];
+    }
+    return value;
+}
+
+std::string generateDevicePID(const std::vector<uint32_t>& table, const std::string& dsn,int nbRoll)
+{
+    uint32_t seed = generatePidSeed(table, dsn);
+    std::ostringstream s;
+    std::vector<unsigned int> pid = {(seed>>24)&0xff,(seed >> 16) & 0xff, (seed >> 8) & 0xff ,(seed) & 0xff,(seed >> 24) & 0xff,(seed >> 16) & 0xff, (seed >> 8) & 0xff ,(seed) & 0xff };
+    int index = 0;
+    for (int cnt = 0; cnt < nbRoll; cnt++)
+    {
+        pid[index] = pid[index] ^ dsn[cnt];
+        index = (index + 1) % 8;
+    }
+    for (int cnt = 0; cnt < 8; cnt++)
+    {
+        index = ((((pid[cnt] >> 5) & 3) ^ pid[cnt]) & 0x1f) + (pid[cnt] >> 7);
+        s << charMap4[index];
+    }
+    return s.str();
+}
+std::string checksumPID(const std::string& pid)
+{
+    CRC32 crcCalculator;
+    uint32_t crc = crcCalculator.Calculate((const uint8_t*)(pid.data()),pid.length());
+    crc = crc ^ (crc >> 16);
+    std::ostringstream s;
+    s << pid;
+    int l = charMap4.size();
+    for (int a = 0; a <= 1; a++)
+    {
+        int b = crc & 0xff;
+        int pos = (b / l) ^ (b % l);
+        s << charMap4[pos % l];
+        crc >>= 8;
+    }
+    return s.str();
+}
+
+template<typename T>
+size_t clen(T finalArg) 
+{
+    return finalArg.size();
+}
+
+template<typename T, typename... Args>
+size_t clen(T first, Args... args) 
+{
+    return first.size() + clen(args...);
+}
 
 
-std::string ReadFileToString(const std::string& filePath) {
+template<typename T>
+void mcpy(std::vector<char>& into,size_t offset,T finalArg)
+{
+    memcpy(&into[offset], finalArg.data(),finalArg.size());
+}
+
+template<typename T, typename... Args>
+void mcpy(std::vector<char>& into, size_t offset, T first, Args... args)
+{
+    memcpy(&into[offset], first.data(), first.size());
+    mcpy(into, offset + first.size(), args...);
+}
+
+template<typename T>
+std::vector<char> ccat(T finalArg)
+{
+    std::vector<char> ret(finalArg.begin(), finalArg.end());
+    return ret;
+}
+
+template<typename T, typename... Args>
+std::vector<char> ccat(T first, Args... args)
+{   
+    std::vector<char> sm(clen(first, args...));
+    mcpy(sm, 0, first, args...);
+    return sm;
+}
+
+std::vector<std::string> getK4Pids(const std::vector<char>& rec209, const std::vector<char>& token,const std::string& dsn, const std::vector<std::string>& extraKindleTokens)
+{
+    std::vector<std::string> ret;
+    if (rec209.size() == 0)
+    {
+        for (auto accountToken : extraKindleTokens)
+        {
+            ret.push_back(dsn+ accountToken);
+        }
+        return ret;
+    }
+    std::vector<uint32_t> table = generatePidEncryptionTable();
+    std::string devicePID = checksumPID(generateDevicePID(table,dsn,4));
+    ret.push_back(devicePID);
+    std::vector<char> sm;
+    std::vector<char> pidHash;
+    std::string bookPID;
+    for (auto accountToken : extraKindleTokens)
+    {
+        sm = ccat(dsn, accountToken, rec209,token);
+        pidHash = CalculateHashVector(sm, BCRYPT_SHA1_ALGORITHM);
+        //std::string sm DSN + accToken + rec209 + token;
+        bookPID=  checksumPID(encodePID(pidHash));
+        ret.push_back(bookPID);
+
+        sm = ccat( accountToken, rec209, token);
+        pidHash = CalculateHashVector(sm, BCRYPT_SHA1_ALGORITHM);
+        bookPID = checksumPID(encodePID(pidHash));
+        ret.push_back(bookPID);
+    }
+    sm = ccat(dsn,  rec209, token);
+    pidHash = CalculateHashVector(sm, BCRYPT_SHA1_ALGORITHM);
+    bookPID = checksumPID(encodePID(pidHash));
+    ret.push_back(bookPID);
+    return ret;
+}
+
+
+std::string ReadFileToString(const fs::path& filePath) {
     std::ifstream file(filePath, std::ios::in | std::ios::binary);
     if (!file.is_open()) {
         return "";
@@ -250,26 +591,592 @@ std::string ReadFileToString(const std::string& filePath) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
-std::vector<char> ReadFileToVector(const std::string& filePath) 
-{
-    std::ifstream file(filePath, std::ios::in | std::ios::binary);
-    if (!file.is_open()) {
-        std::cout<<"Could not open" << strerror(errno) << std::endl;
-        return std::vector<char>();
-    }
-    return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-}
 std::vector<char> ReadFileToVector(const fs::path& filePath) 
 {
 
     std::ifstream file(filePath, std::ios::in | std::ios::binary);
     if (!file.is_open()) {
-        std::cout << "Could not open" << strerror(errno) << std::endl;
+        std::cout << "Could not open " << filePath << " with " << strerror(errno) << std::endl;
         return std::vector<char>();
     }
     return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
 }
+
+//Kinda AI-assisted port of Dedrm for other two book formats
+class DrmException : public std::runtime_error
+{
+public:
+    explicit DrmException(const std::string& message) : std::runtime_error(message) {}
+};
+//mz_zip_add_mem_to_archive_file_in_place(outputFile, archivedName.c_str(), outme.data(), outme.size(), NULL, 0, MZ_BEST_COMPRESSION)
+struct BookInterface 
+{
+    virtual ~BookInterface() = default;
+    virtual std::string getBookType() { return "UNK"; }
+    virtual std::pair<std::vector<char>, std::vector<char>> getPIDMetaInfo() 
+    { 
+        return { std::vector<char>(), std::vector<char> ()};
+    }
+    virtual void processBook(const std::vector<std::string>& pids) {}
+    virtual void cleanup() {}
+    virtual std::string  getBookExtension() { return ".unk"; }
+    virtual void writeFile(const fs::path& fl) {};
+  
+};
+
+
+//MOBI stuff
+
+void writeFileBasic(const fs::path& filename, const std::vector<char>& data)
+{
+    std::ofstream file(filename, std::ios::out | std::ios::binary);
+    if (!file)
+    {
+        std::cout << " Could not open file " << filename << " For writing " << strerror(errno) << std::endl;
+        return;
+    }
+    //  std::cout << hexStr((uint8_t*) & data[0], 16) << std::endl;
+    file.write(data.data(), data.size());
+}
+
+uint16_t unpack_H(const std::vector<char>& buffer, size_t offset = 0) 
+{
+
+    uint16_t b1 = buffer[offset];
+    uint16_t b2 = (UCHAR)buffer[offset+1];
+    return (b1<<8)|b2;
+}
+
+uint16_t unpack_H(const char* buffer, size_t offset = 0)
+{
+    return (static_cast<uint16_t>((UCHAR)buffer[offset]) << 8) |
+        (static_cast<uint16_t>((UCHAR)buffer[offset + 1]));
+}
+
+size_t getSizeOfTrailingDataEntry(const char *ptr, size_t size)
+{
+    size_t bitpos = 0;
+    size_t result = 0;
+    if (size <= 0)
+    {
+        return result;
+    }
+    while (true)
+    {
+        UCHAR v = (UCHAR)ptr[size-1];
+        result |= (v & 0x7F) << bitpos;
+        bitpos += 7;
+        size -= 1;
+        if ((v & 0x80) != 0 || (bitpos >= 28) || (size == 0))
+        {
+            return result;
+        }
+    }
+    return 0;
+}
+
+size_t getSizeOfTrailingDataEntries(const char* ptr, size_t size,uint32_t flags)
+{
+    size_t num = 0;
+    uint32_t testflags = flags >> 1;
+    while (testflags)
+    {
+        if (testflags & 1) num += getSizeOfTrailingDataEntry(ptr, size - num);
+        testflags >>= 1;
+    }
+    if (flags & 1)
+    {
+        num += (ptr[size - num - 1] & 0x3) + 1;
+    }
+    return num;
+}
+struct MobiSection
+{
+    uint32_t offset;
+    uint32_t flags;
+    uint32_t val;
+    MobiSection(char* buffer)
+    {
+            offset= ((uint32_t)((UCHAR)buffer[0]) << 24) |
+                ((uint32_t)((UCHAR)buffer[1]) << 16) |
+                ((uint32_t)((UCHAR)buffer[2]) << 8) |
+                ((uint32_t)((UCHAR)buffer[3]));
+           flags = (UCHAR)buffer[4];
+           val = (UCHAR)buffer[5] << 16 | (UCHAR)buffer[6] << 8 | (UCHAR)buffer[7];
+        
+
+    }
+};
+uint32_t unpack_L(const char * buffer, size_t offset = 0) {
+    return (static_cast<uint32_t>((UCHAR)buffer[offset]) << 24) |
+        (static_cast<uint32_t>((UCHAR)buffer[offset + 1]) << 16) |
+        (static_cast<uint32_t>((UCHAR)buffer[offset + 2]) << 8) |
+        (static_cast<uint32_t>((UCHAR)buffer[offset + 3]));
+}
+
+unsigned char* PC1(const unsigned char* key, unsigned int klen, const unsigned char* src,
+    unsigned char* dest, unsigned int len, int decryption)
+{
+    unsigned int sum1 = 0;
+    unsigned int sum2 = 0;
+    unsigned int keyXorVal = 0;
+    unsigned short wkey[8];
+    unsigned int i;
+    if (klen != 16) {
+        fprintf(stderr, "Bad key length!\n");
+        return NULL;
+    }
+    for (i = 0; i < 8; i++) {
+        wkey[i] = (key[i * 2] << 8) | key[i * 2 + 1];
+    }
+    for (i = 0; i < len; i++) {
+        unsigned int temp1 = 0;
+        unsigned int byteXorVal = 0;
+        unsigned int j, curByte;
+        for (j = 0; j < 8; j++) {
+            temp1 ^= wkey[j];
+            sum2 = (sum2 + j) * 20021 + sum1;
+            sum1 = (temp1 * 346) & 0xFFFF;
+            sum2 = (sum2 + sum1) & 0xFFFF;
+            temp1 = (temp1 * 20021 + 1) & 0xFFFF;
+            byteXorVal ^= temp1 ^ sum2;
+        }
+        curByte = src[i];
+        if (!decryption) {
+            keyXorVal = curByte * 257;
+        }
+        curByte = ((curByte ^ (byteXorVal >> 8)) ^ byteXorVal) & 0xFF;
+        if (decryption) {
+            keyXorVal = curByte * 257;
+        }
+        for (j = 0; j < 8; j++) {
+            wkey[j] ^= keyXorVal;
+        }
+        dest[i] = curByte;
+    }
+    return dest;
+}
+std::vector<char> PC1d(const std::vector<char>&key, const std::vector<char>& vec,int dec)
+{
+    std::vector<char> temp_key(vec.size());
+    PC1((const unsigned char*)&key[0], key.size(), (const unsigned char*)&vec[0], (unsigned char*)&temp_key[0], vec.size(), dec);
+    return temp_key;
+
+}
+class MobiBook : public BookInterface
+{
+
+public:
+    bool init_done = false;
+    int num_sections=0;
+    std::string magic;
+    std::vector<char> data_file;
+    std::vector<char> mobi_data;
+    std::vector<char> sect;
+    //std::vector<char> header;
+    std::vector<MobiSection> sections;
+    int crypto_type = -1;
+    uint16_t records=0;
+    uint16_t compression=0;
+    bool print_replica=false;
+    uint32_t extra_data_flags = 0;
+    uint32_t mobi_length = 0;
+    uint32_t mobi_codepage = 1252;
+    int mobi_version = -1;
+    std::map<uint32_t, std::vector<char>> meta_array;
+    std::vector<char> loadSection(int section)
+    {
+        int endoff = 0;
+        if (section + 1 == num_sections)
+        {
+            endoff = data_file.size();
+        }
+        else
+        {
+            endoff = sections[section+1].offset;
+        }
+        int off= sections[section ].offset;
+        return std::vector<char>(data_file.begin() + off, data_file.begin() + endoff);
+    }
+    void patch(size_t offset, const char* new_data,size_t sz )
+    {
+        memcpy(&data_file[offset], new_data, sz);
+    }
+    void patchSection(int section, const char* new_data,size_t sz, size_t in_off=0)
+    {
+        int endoff = 0;
+        if (section + 1 == num_sections)
+        {
+            endoff = data_file.size();
+        }
+        else
+        {
+            endoff = sections[section + 1].offset;
+        }
+        uint32_t off = sections[section].offset;
+        if (off + in_off + sz > endoff)
+        {
+            std::cout << "ERROR* mobi patching exceeds data len" << std::endl;
+            return;
+        }
+        patch(off + in_off, new_data, sz);
+     }
+ 
+    MobiBook(const fs::path& path)
+    {
+        std::cout << "MobiDeDrm Port" << std::endl;
+        data_file = ReadFileToVector(path);
+        //header.resize(78);
+       // memcpy(&header[0],&data_file[0],78);
+        magic = std::string(data_file.begin() + 0x3C, data_file.begin() + 0x3C + 8);
+        if (magic!= "BOOKMOBI" && magic != "TEXtREAd")
+        {
+            std::cout << path << " is not a mobi book " << std::endl;
+            init_done = false;
+            return;
+        }
+
+        num_sections = unpack_H(data_file, 76);//.header[76:78]
+        for (int i = 0; i < num_sections; i++)
+        {
+            MobiSection ms(&data_file[78+i*8]);
+            sections.push_back(ms);
+        }
+        sect = loadSection(0);
+        records = unpack_H(&sect[8]);
+        compression = unpack_H(&sect[0]);
+        if (magic == "TEXtREAd")
+        {
+            std::cout << "PalmDoc format book detected." << std::endl;
+            init_done = true;
+            return;
+        }
+        mobi_length = unpack_L(&sect[0x14]);
+        mobi_codepage = unpack_L(&sect[0x1c]);
+        mobi_version = unpack_L(&sect[0x68]);
+        std::cout << "MOBI header version " << mobi_version << ", header length " << mobi_length<< std::endl;
+        if (mobi_length >= 0xe4 && mobi_version >= 5)
+        {
+            extra_data_flags = unpack_H(sect, 0xf2);
+        }
+        if (compression != 17480)
+        {
+            extra_data_flags &= 0xFFFE;
+        }
+        if (sect.size() >= 0x84)
+        {
+            uint32_t exth_flag= unpack_L(&sect[0x80]);
+            std::vector<char> exth;
+            if (exth_flag & 0x40&&sect.size()>16+mobi_length)
+            {
+                exth = std::vector<char>(sect.begin()+16+mobi_length,sect.end());
+                if (exth.size() > 12 && exth[0] == 'E' && exth[1] == 'X' && exth[2] == 'T' && exth[3] == 'H')
+                {
+                    uint32_t nitems = unpack_L(&exth[8]);
+                    uint32_t pos = 12;
+                    for (uint32_t i = 0; i < nitems; i++)
+                    {
+                        uint32_t type= unpack_L(&exth[pos]);
+                        uint32_t size = unpack_L(&exth[pos+4]);
+                        std::vector<char> content(exth.begin()+8+pos, exth.begin()+size+pos);
+                        meta_array[type] = content;
+                        if (type == 401 && size == 9)
+                        {
+                           unsigned char b = 144;
+                            patchSection(0, (char*) & b, 1, 16 + mobi_length + pos + 8);
+                        }
+                        if (type == 404 && size == 9)
+                        {
+                            char b = 0;
+                            patchSection(0, &b, 1, 16 + mobi_length + pos + 8);
+                        }
+                        if (type == 405 && size == 9)
+                        {
+                            char b = 0;
+                            patchSection(0, &b, 1, 16 + mobi_length + pos + 8);
+                            
+                        }
+                        if (type == 406 && size == 16)
+                        {
+                            char b[8] = { 0,0,0,0,0,0,0,0 };
+                            patchSection(0, b, 8, 16 + mobi_length + pos + 8);
+                        }
+                        if (type == 208)
+                        {
+                            std::vector<char> b;
+                            b.resize(size-8);
+                            patchSection(0, &b[0], 8, 16 + mobi_length + pos + 8);
+                        }
+                        pos += size;
+                    }
+                }
+            }
+        }
+        init_done = true;
+    }
+    virtual ~MobiBook() {};
+    virtual std::string getBookType() { return "MOBI"; }
+    virtual std::string getBookExtension() 
+    { 
+        if (print_replica)
+        {
+            return ".azw4";
+        }
+        if (mobi_version >= 8)
+        {
+            return ".azw3";
+        }
+        return ".mobi";
+    }
+    virtual void writeFile(const fs::path& fl) 
+    {
+        writeFileBasic(fl, mobi_data);
+    };
+    virtual std::pair<std::vector<char>, std::vector<char>> getPIDMetaInfo()
+    { 
+        std::vector<char> rec209;
+        std::vector<char> token;
+       
+        auto fnd = meta_array.find(209);
+        if (fnd != meta_array.end())
+        {
+            rec209 = fnd->second;
+            token.clear();
+            for (size_t i = 0; i < rec209.size(); i+=5)
+            {
+                uint32_t val = unpack_L(&rec209[i+1]);
+                auto fval = meta_array.find(val);
+                if (fval != meta_array.end())
+                {
+                    token = ccat(token, fval->second);
+                }
+            }
+        }
+        return { rec209, token };
+    
+    }
+    std::pair<std::vector<char>, std::string>  parseDRM(const char * data,int count,const std::vector<std::string>& pidlist)
+    {
+        std::vector<char> found_key;
+        std::string fpid = "";
+        std::vector<char> keyvec1 = HexToBytesC("723833b0b4f2e3cadf0901d6e2e03f96");
+        for (auto pid : pidlist)
+        {
+            std::string bigpid(16, '\0');
+            size_t copy_size = min(pid.length(), size_t(16));
+            bigpid.replace(0, copy_size, pid, 0, copy_size);
+            std::vector<char> bp(bigpid.begin(),bigpid.end());
+            //unsigned char* PC1(const unsigned char* key, unsigned int klen, const unsigned char* src,
+             //   unsigned char* dest, unsigned int len, int decryption)
+            //temp_key = PC1(keyvec1, bigpid, False)
+
+            std::vector<char> temp_key = PC1d(keyvec1, bp, 0);
+            int temp_key_sum = 0;
+            for (auto c : temp_key)
+            {
+                temp_key_sum += (UCHAR)c;
+            }
+            temp_key_sum &= 0xff;
+            found_key.clear();
+            for (int i = 0; i < count; i++)
+            {
+                uint32_t verification = unpack_L(&data[i * 0x30]);
+                uint32_t size = unpack_L(&data[i * 0x30+4]);
+                uint32_t type = unpack_L(&data[i * 0x30 + 8]);
+                char cksum = data[i * 0x30 + 12];
+                std::vector<char> cookie(&data[i * 0x30 + 16], &data[i * 0x30 + 16 + 32]);
+                if ((UCHAR)cksum == (UCHAR)temp_key_sum)
+                {
+                    cookie = PC1d(temp_key, cookie, 1);
+                    /*
+                    ver,flags,finalkey,expiry,expiry2 = struct.unpack('>LL16sLL', cookie)
+                    if verification == ver and (flags & 0x1F) == 1:
+                        found_key = finalkey
+                        break
+                    */
+                    uint32_t ver = unpack_L(&cookie[0]);
+                    uint32_t flags = unpack_L(&cookie[4]);
+                    std::vector<char> finalkey(cookie.begin()+8, cookie.begin() + 8+16);
+                    if (ver == verification && (flags & 0x1f) == 1)
+                    {
+                        found_key = finalkey;
+                        fpid = pid;
+                        break;
+                    }
+                }
+                
+            }
+            if (found_key.size() > 0)
+            {
+                break;
+            }
+        }
+        if (found_key.size() == 0)
+        {
+            std::string  pid = "00000000";
+            std::vector<char> temp_key = keyvec1;
+            int temp_key_sum = 0;
+            for (auto c : temp_key)
+            {
+                temp_key_sum += (UCHAR)c;
+            }
+            temp_key_sum &= 0xff;
+            for (int i = 0; i < count; i++)
+            {
+                uint32_t verification = unpack_L(&data[i * 0x30]);
+                uint32_t size = unpack_L(&data[i * 0x30 + 4]);
+                uint32_t type = unpack_L(&data[i * 0x30 + 8]);
+                char cksum = data[i * 0x30 + 9];
+                std::vector<char> cookie(&data[i * 0x30 + 12], &data[i * 0x30 + 12 + 32]);
+                if (cksum == temp_key_sum)
+                {
+                    cookie = PC1d(temp_key, cookie, 1);
+                    uint32_t ver = unpack_L(&cookie[0]);
+                    uint32_t flags = unpack_L(&cookie[4]);
+                    std::vector<char> finalkey(cookie.begin() + 8, cookie.begin() + 8 + 16);
+                    if (ver == verification && (flags & 0x1f) == 1)
+                    {
+                        found_key = finalkey;
+                        fpid = pid;
+                        break;
+                    }
+                }
+
+            }
+        }
+        return { found_key,fpid };
+    }
+    virtual void processBook(const std::vector<std::string>& pids) 
+    {
+        crypto_type = unpack_H(&sect[0xc]);
+        std::cout << "Crypto type is " << crypto_type << std::endl;
+        if (crypto_type == 0)
+        {
+            std::cout << "Book is not encrypted " << std::endl;
+            std::vector<char> sec1 = loadSection(1);
+            print_replica = (sec1[0] == '%' && sec1[1] == 'M' && sec1[2] == 'O' && sec1[3] == 'P');
+            mobi_data = data_file;
+            return;
+        }
+        if (crypto_type != 2 && crypto_type != 1)
+        {
+            throw DrmException("Cannot decode unknown Mobipocket encryption type");
+        }
+        std::vector<std::string> goodpids;
+        for (auto pid : pids)
+        {
+            if (pid.size() == 8)
+            {
+                goodpids.push_back(pid);
+            }
+            if (pid.size() == 10)
+            {
+                std::string ck = checksumPID(pid.substr(0, 8));
+                if (ck != pid)
+                {
+                    std::cout << "Warning PID checksum does not match: old: " << pid << " new: " << ck<<std::endl;
+                }
+                goodpids.push_back(pid.substr(0, 8));
+            }
+        }
+        std::string fpid;
+        std::vector<char> found_key;
+        if (crypto_type == 1)
+        {
+            std::vector<char> t1_keyvec = HexToBytesC("5144435645504d55363735525542535a");
+            std::vector<char> bookkey_data;
+            if (magic == "TEXtREAd")
+            {
+                bookkey_data = std::vector<char>(sect.begin()+0xe, sect.begin() + 0xe+16);
+            }
+            else
+            {
+                if (mobi_version < 0)
+                {
+                    bookkey_data = std::vector<char>(sect.begin() + 0x90, sect.begin() + 0x90 + 16);
+                }
+                else
+                {
+                    bookkey_data = std::vector<char>(sect.begin() + 16+ mobi_length, sect.begin() + mobi_length + 32);
+                }
+
+            }
+            fpid = "00000000";
+            found_key = PC1d(t1_keyvec, bookkey_data,1);
+        }
+        else
+        {
+            uint32_t drm_ptr = unpack_L(&sect[0xa8]);
+            uint32_t drm_count = unpack_L(&sect[0xa8+4]);
+            uint32_t drm_size = unpack_L(&sect[0xa8 + 8]);
+            uint32_t drm_flags = unpack_L(&sect[0xa8 + 12]);
+            if (drm_count == 0)
+            {
+                throw DrmException("MOBI Encryption not initialised.");
+            }
+            std::pair<std::vector<char>, std::string> fkp = parseDRM(&sect[drm_ptr], drm_count, goodpids);
+            if (fkp.first.size() == 0)
+            {
+                std::cout << "Tried  " << goodpids.size() << " PIDS " << std::endl;
+                throw DrmException("No key found");
+            }
+            found_key = fkp.first;
+            fpid = fkp.second;
+            std::vector<char> b;
+            b.resize(drm_size);
+            patchSection(0, &b[0], drm_size, drm_ptr);
+            b.resize(16);
+            b[0] = -1;// 0xff;
+            b[1] = -1;// 0xff;
+            b[2] = -1;// 0xff;
+            b[3] = -1;// 0xff;
+            patchSection(0, &b[0], 16, 0xA8);
+        }
+        if (fpid == "00000000")
+        {
+            std::cout << "File has default encryption, no specific key needed." << std::endl;
+        }
+        else
+        {
+            std::cout << "File is encoded with PID " <<fpid<< std::endl;
+        }
+        uint16_t ss = 0;
+        patchSection(0, (const char*)&ss, 2, 0xC);
+        std::cout << "Decrypting..." << std::endl;
+        std::vector<std::vector<char>> mobidataList;
+        mobidataList.push_back(std::vector<char>(data_file.begin(), data_file.begin()+sections[1].offset));
+        for (int i = 1; i < records + 1; i++)
+        {
+            std::vector<char> data = loadSection(i);
+            size_t extra_size = getSizeOfTrailingDataEntries(&data[0], data.size(), extra_data_flags);
+            std::vector<char> truncated = std::vector<char>(data.begin(), data.begin() + data.size()-extra_size);
+            std::vector<char> decoded_data = PC1d(found_key, truncated, 1);
+            print_replica = (decoded_data[0] == '%' && decoded_data[1] == 'M' && decoded_data[2] == 'O' && decoded_data[3] == 'P');
+            mobidataList.push_back(decoded_data);
+            if (extra_size > 0)
+            {
+                mobidataList.push_back(std::vector<char>( data.begin() + data.size() - extra_size,data.end()));
+            }
+        }
+        if (num_sections > records + 1)
+        {
+            mobidataList.push_back(std::vector<char>(data_file.begin()+ sections[records + 1].offset, data_file.end()));
+        }
+        size_t totalSize = 0;
+        for (const auto& subVector : mobidataList) {
+            totalSize += subVector.size();
+        }
+        mobi_data.reserve(totalSize);
+
+        // 3. Append each inner vector to the single flat vector
+        for (const auto& subVector : mobidataList) {
+            mobi_data.insert(mobi_data.end(), subVector.begin(), subVector.end());
+        }
+        std::cout << "Done parsing MOBI" << std::endl;
+    }
+    virtual void cleanup() {}
+};
 
 //--------------------------------------- ION reader
 
@@ -1340,7 +2247,17 @@ int finIndexIn(const std::vector<std::string>& p, const std::string& val)
 
 //--------------------------------------------------end ION
 
-
+struct ppatch
+{
+    int spatch = 0;
+    std::vector<BYTE> patch = { 0x66, 0xB8, 0x01, 0x00, 0xC3 };
+    std::vector<BYTE> unpatch;
+    ppatch(int sp,const  std::vector<BYTE>& ptch)
+    {
+        spatch = sp;
+        patch = ptch;
+    }
+};
 
 struct ExecOffsets
 {
@@ -1360,8 +2277,10 @@ struct ExecOffsets
     int mbox_size = 0;
     int mbox_iv_offset = 0;
     int allemaric_shift=0;
-    int spatch = 0;
-    std::string version = "";
+  //  int spatch = 0;
+    std::string version = "unk ";
+    //std::vector<BYTE> patch = { 0x66, 0xB8, 0x01, 0x00, 0xC3 };
+    std::vector<ppatch> spatches;
     int vernum = -1;
 };
 
@@ -1376,8 +2295,8 @@ ExecOffsets KindleReader1_0_15230()
     ret.deobfuscate_storage= 0x1009b8d0;
 
     ret.get_storage_value = 0x1009c820;
-
-    ret.spatch= 0x10065a60;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
+    //ret.spatch= 0x10065a60;
     ret.get_plugin_man = 0x11057890;
     ret.load_all = 0x11057990;
 
@@ -1401,7 +2320,9 @@ ExecOffsets KindleReader1_0_16034()
 {
     ExecOffsets ret;
     ret.make_storage = 0x10dbf3c0;
-    ret.spatch = 0x10065a60;
+    //ret.spatch = ;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
+
     ret.luceneaddr = 0x11046b60;
     ret.entry = 0;
     ret.deobfuscate_storage = 0x1009b8d0;
@@ -1427,7 +2348,9 @@ ExecOffsets KindleReader1_0_16118()
     ret.deobfuscate_storage = 0x1009b8d0;
     ret.get_storage_value = 0x1009c820;
     ret.make_storage = 0x10dbf3c0;
-    ret.spatch = 0x10065a60;
+   // ret.spatch = 0x10065a60;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
+
     ret.luceneaddr = 0x11046b60;
     ret.get_plugin_man = 0x11057840;
     ret.load_all = 0x11057940;
@@ -1443,7 +2366,122 @@ ExecOffsets KindleReader1_0_16118()
     ret.vernum = 2;
     return ret;
 }
+ExecOffsets KindleReader1_0_18320()
+{
+    ExecOffsets ret;
+    ret.make_storage = 0x10dbf770;
+    ret.luceneaddr = 0x11047130;
+  //  ret.spatch = 0x10065a60;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
+    ret.get_storage_value = 0x1009c870;
+    ret.deobfuscate_storage = 0x1009b920;
+    ret.get_plugin_man = 0x11057e10;
+    ret.load_all = 0x11057f10;
+    ret.decr_offset = 0x11b23b10;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+    ret.get_factory = 0x11067fd0;
+    ret.open_book = 0x110680a0;
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.18320";
+    ret.vernum = 3;
+    ret.drm_provider = 0x110683e0;
+    ret.entry = 0;
+    return ret;
+}
 
+//a5af62fd27d6cf599575ba0c1c112985
+ExecOffsets KindleReader1_0_18632()
+{
+    ExecOffsets ret;
+    ret.get_factory = 0x11067fd0;
+    ret.open_book = 0x110680a0;
+    ret.luceneaddr = 0x11047130;
+    ret.make_storage = 0x10dbf770;
+   // ret.spatch = 0x10065a60;
+    ret.spatches.push_back(ppatch(0x10065a60, { 0x66, 0xB8, 0x01, 0x00, 0xC3 }));
+    ret.get_storage_value = 0x1009c870;
+    ret.deobfuscate_storage = 0x1009b920;
+    ret.get_plugin_man = 0x11057e10;
+    ret.load_all = 0x11057f10;
+    ret.drm_provider = 0x110683e0;
+    
+
+    ret.decr_offset = 0x11b23bf0;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.18632";
+    ret.vernum = 4;
+   
+    ret.entry = 0;
+    return ret;
+}
+
+//7a7f3827c80e19a4ebda38c2853eb590
+ExecOffsets KindleReader1_0_22326()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x111498e0;
+    ret.make_storage = 0x10eca5f0;
+  //  ret.patch = { 0xe9, 0xd6, 0x00, 0x00, 0x00};// e9 df 00 00 00
+    //ret.spatch = 0x10eca624;
+    ret.spatches.push_back(ppatch(0x10eca624, { 0xe9, 0xd6, 0x00, 0x00, 0x00 }));
+    ret.spatches.push_back(ppatch(0x10eca054, { 0xe9, 0xf9, 0x00, 0x00, 0x00 }));
+   // ret.patch = { 0xe9, 0xf9, 0x00, 0x00, 0x00};// e9 df 00 00 00
+   // ret.spatch = 0x10eca054;
+
+
+    ret.get_storage_value = 0x1008ad10;
+    ret.deobfuscate_storage = 0x10089dc0;
+    ret.get_plugin_man = 0x1115a620;
+    ret.load_all = 0x1115a720;
+    ret.get_factory = 0x1116bd00;
+    ret.open_book = 0x1116bdd0;
+    ret.drm_provider = 0x1116c110;
+    ret.decr_offset = 0x11bb80a0;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.22326";
+    ret.vernum = 5;
+
+    ret.entry = 0;
+    return ret;
+}
+
+//5deec17cc97e250f1954a0c4b2c86005
+ExecOffsets KindleReader1_0_22920()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x111498e0;
+    ret.make_storage = 0x10eca5f0;
+    //  ret.patch = { 0xe9, 0xd6, 0x00, 0x00, 0x00};// e9 df 00 00 00
+      //ret.spatch = 0x10eca624;
+    ret.spatches.push_back(ppatch(0x10eca624, { 0xe9, 0xd6, 0x00, 0x00, 0x00 }));
+    ret.spatches.push_back(ppatch(0x10eca054, { 0xe9, 0xf9, 0x00, 0x00, 0x00 }));
+    ret.get_storage_value = 0x1008ad10;
+    ret.deobfuscate_storage = 0x10089dc0;
+    ret.get_plugin_man = 0x1115a620;
+    ret.load_all = 0x1115a720;
+    ret.get_factory = 0x1116bd00;
+    ret.open_book = 0x1116bdd0;
+    ret.drm_provider = 0x1116c110;
+
+
+    ret.decr_offset = 0x11bb80a0;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.22920";
+    ret.vernum = 5;
+
+    ret.entry = 0;
+    return ret;
+}
 struct IATRESULTS
 {
     enum class FAILUREREASON
@@ -1628,7 +2666,7 @@ void PrintSimpleCallStack() {
 
 
 // Helper function to write a byte buffer to a file
-bool WriteBufferToFile(const std::string& filePath, const BYTE* data, DWORD size) {
+bool WriteBufferToFile(const fs::path& filePath, const BYTE* data, DWORD size) {
     std::ofstream file(filePath, std::ios::out | std::ios::binary);
     if (!file.is_open()) {
         return false;
@@ -1755,9 +2793,86 @@ struct KeyData
     }
 };
 
-
+std::vector<std::string> sn;
+const int keysetIndex = 38;
+const int secretKeyIndex = 44;
+const int idIndex = 34;
+const int algorithmIndex = 28;
+const int formatIndex = 33;
+const int encodedIndex = 29;
 uint8_t* seccan = nullptr;
 KeyData keydataAccumulator;
+
+bool tryAssignKey(BinaryIonParser* drmkey)
+{
+    drmkey->stepin();
+    if (drmkey->readerr) return  false;
+    std::string key;
+    std::string keyid;
+    std::string algo;
+    std::string form;
+    while (drmkey->hasnext())
+    {
+        //std::cout << "Next" << std::endl;
+        if (drmkey->readerr) return false;
+        drmkey->next();
+        //std::cout << drmkey->getAnnotType() << std::endl;
+        if (drmkey->getAnnotType() != secretKeyIndex)
+            continue;
+        // std::cout << "Found index" << std::endl;
+        drmkey->stepin();
+        if (drmkey->readerr) return false;
+        while (drmkey->hasnext())
+        {
+            drmkey->next();
+            if (drmkey->readerr) return false;
+            switch (drmkey->valuefieldid)
+            {
+            case idIndex: { keyid = drmkey->stringvalue(); }; break;
+            case algorithmIndex: {
+                algo = drmkey->stringvalue();
+                if (algo != "AES")
+                {
+                    std::cout << "Found key with unknown algo: " << algo << std::endl;
+                    return  false;
+                }
+            }; break;
+            case formatIndex: {
+                form = drmkey->stringvalue();
+                if (form != "RAW")
+                {
+                    std::cout << "Found key with unknown format: " << form << std::endl;
+                    return false;
+                }
+            }; break;
+            case encodedIndex: {
+                std::vector<uint8_t> ekey = drmkey->lobvalue();
+                key = hexStr(&ekey[0], ekey.size());
+            }; break;
+            default:break;
+            }
+
+        }
+        // drmkey->stepout(); -should not be needed
+        break;
+    }
+    if (keyid != "" && !key.empty())
+    {
+        std::cout << keyid << "$secret_key:" << key << std::endl;
+        if (key.size() == 32)
+        {
+            keydataAccumulator.keys_128.insert(key);
+        }
+        if (key.size() == 64)
+        {
+            keydataAccumulator.keys_256.insert(key);
+        }
+        return true;
+    }
+    return false;
+}
+
+bool afb = false;
 void freeFake(void* p)
 {
     if (armed && p != nullptr)
@@ -1777,12 +2892,60 @@ void freeFake(void* p)
 
             }
         }
+        if (afb)
+        {
+            for (const auto& a : allocations)
+            {
+                size_t sz = a.second;
+                uint8_t* ptr = (uint8_t*)a.first;
+                if (sz <= 64 && sz >= 41)
+                {
+                    if (allhex(ptr, 40)&&ptr[40]==0)
+                    {
+                        std::string cand = std::string((char*)ptr, 40);
+                        if (keydataAccumulator.old_secrets.find(cand) == keydataAccumulator.old_secrets.end())
+                        {
+                            std::cout << "Secret candidate: " << cand << std::endl;
+                            keydataAccumulator.old_secrets.insert(cand);
+                        }
+                    }
+                }
+            }
+        }
         if (fsize > 0)
         {
-          //  printf("Freeing %d at %p\n", fsize,p);
-          //  std::cout << hexStr((uint8_t*)p, fsize) << std::endl;
+           // printf("Freeing %d at %p\n", fsize,p);
+           // std::cout << hexStr((uint8_t*)p, fsize) << std::endl;
+            
         }
         if (p == seccan) seccan = nullptr;
+        if (fsize >= 39)
+        {
+            uint8_t* pp = (uint8_t*)p;
+            for (int poffs = 0; poffs < 30; poffs++)
+            {
+                BinaryIonParser bp(&pp[poffs], fsize - poffs, TID_TYPEDECL);
+                if (bp.hasnext())
+                {
+                    int nxt = bp.next();
+                    if (nxt == TID_LIST)
+                    {
+                        if (bp.annotations.size() > 0 && bp.annotations[0] == keysetIndex)
+                        {
+                            //valuefieldid
+                            //std::cout << "Correct: " << hexStr((uint8_t*)&pp[16], 16) << std::endl;
+                            if(tryAssignKey(&bp))
+                            break;
+                            // while (true) {}
+                        }
+
+                    }
+
+                }
+            }
+            
+           
+        }
         allocations.erase(p);
     }
    free(p);
@@ -1792,10 +2955,10 @@ void* memcpyFake(void* dst, void* src,size_t sz)
 {
     if (armed)
     {
-       // std::cout << "Caught memcpy of " << sz << "("<<allocations[src]<<") bytes, from " << src << " to " << dst <<"("<<allocations[dst]<<")"<< std::endl;
+        //std::cout << "Caught memcpy of " << sz << "("<<allocations[src]<<") bytes, from " << src << " to " << dst <<"("<<allocations[dst]<<")"<< std::endl;
         if (allhex((uint8_t*)src, sz)&&sz>10)
         {
-            //std::cout << "Allhex!" << std::endl;
+           // std::cout << "Allhex!" << std::endl;
             if (sz == 31 && allocations[dst] == 48)
             {
 
@@ -1804,7 +2967,7 @@ void* memcpyFake(void* dst, void* src,size_t sz)
                // PrintSimpleCallStack();
             }
         }
-        //std::cout << hexStr((uint8_t*)src, sz) << std::endl;
+     //   std::cout << hexStr((uint8_t*)src, sz) << std::endl;
     }
   
     void * ret = memcpy(dst, src, sz);
@@ -1818,24 +2981,26 @@ BOOL ConvertStringSecurityDescriptorToSecurityDescriptorWFake(LPCWSTR StringSecu
    std::wcout << "ConvertStringSecurityDescriptorToSecurityDescriptorWFake " << StringSecurityDescriptor << " revision " << StringSDRevision << std::endl;
    return  ConvertStringSecurityDescriptorToSecurityDescriptorW(StringSecurityDescriptor, StringSDRevision, SecurityDescriptor, SecurityDescriptorSize);
 }
-BYTE unpatchBytes[5];
-bool PatchWithMovAxRet() {
+//std::vector<BYTE> unpatchBytes;
 
-    BYTE* targetAddress = reinterpret_cast<BYTE*>(curOffs.spatch+globoffs);
+bool PatchWithMovAxRet(int offsetAddr,const std::vector<BYTE>& patch, std::vector<BYTE>& unpatch) {
+
+    BYTE* targetAddress = reinterpret_cast<BYTE*>(offsetAddr +globoffs); //curoffs.spatch
     DWORD oldProtect;
 
     // Raw instruction bytes: 
     // 66 B8 01 00 = mov ax, 0x1
     // C3          = ret
-    BYTE patchBytes[5] = {0x66, 0xB8, 0x01, 0x00, 0xC3};
-    size_t patchSize = sizeof(patchBytes);
 
+    size_t patchSize = patch.size();
+    unpatch.resize(patchSize);
+  //  printf("Target address: %p size %d\n", targetAddress, (int)patchSize);
     // 2. Modify memory page rights to read/write/execute
     if (VirtualProtect(targetAddress, patchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) {
 
         // 3. Apply the 5-byte instruction override sequence
-        memcpy(unpatchBytes, targetAddress, patchSize);
-        memcpy(targetAddress, patchBytes, patchSize);
+        memcpy(unpatch.data(), targetAddress, patchSize);
+        memcpy(targetAddress, patch.data(), patchSize);
 
         // 4. Restore original system memory protection states
         VirtualProtect(targetAddress, patchSize, oldProtect, &oldProtect);
@@ -1843,7 +3008,7 @@ bool PatchWithMovAxRet() {
         // 5. Clear CPU pipeline cache to prevent execution misalignment
         FlushInstructionCache(GetCurrentProcess(), targetAddress, patchSize);
 
-        std::cout << "[+] Successfully patched spatch" << std::endl;// with mov ax, 1; ret
+        std::cout << "[+] Successfully patched spatch with " << patchSize << " bytes "<< hexStr((uint8_t*)&unpatch[0], patchSize) << std::endl;// with mov ax, 1; ret
         return true;
     }
 
@@ -1851,18 +3016,19 @@ bool PatchWithMovAxRet() {
     return false;
 }
 
-bool UnpatchWithMovAxRet() {
+bool UnpatchWithMovAxRet(int offsetAddr, const std::vector<BYTE>& unpatch) {
     // 1. Identify target address location
-    BYTE* targetAddress = reinterpret_cast<BYTE*>(curOffs.spatch + globoffs);
+    BYTE* targetAddress = reinterpret_cast<BYTE*>(offsetAddr + globoffs);
     DWORD oldProtect;
-    size_t patchSize = sizeof(unpatchBytes);
+    size_t patchSize = unpatch.size();
 
     // 2. Modify memory page rights to read/write/execute
+   // printf("Target address: %p size %d\n", targetAddress,(int)patchSize);
     if (VirtualProtect(targetAddress, patchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) {
 
         // 3. Apply the 5-byte instruction override sequence
  
-        memcpy(targetAddress, unpatchBytes, patchSize);
+        memcpy(targetAddress, unpatch.data(), patchSize);
 
         // 4. Restore original system memory protection states
         VirtualProtect(targetAddress, patchSize, oldProtect, &oldProtect);
@@ -1870,14 +3036,32 @@ bool UnpatchWithMovAxRet() {
         // 5. Clear CPU pipeline cache to prevent execution misalignment
         FlushInstructionCache(GetCurrentProcess(), targetAddress, patchSize);
 
-        std::cout << "[+] Successfully unpatched spatch" << std::endl;
+        std::cout << "[+] Successfully unpatched " << std::endl;
         return true;
     }
 
     std::cout << "[-] VirtualProtect failed. Error code: " << GetLastError() << std::endl;
     return false;
 }
+bool patchAMove()
+{
 
+    for (auto& a : curOffs.spatches)
+    {
+        if (!PatchWithMovAxRet(a.spatch, a.patch, a.unpatch)) return false;
+    }
+    printf("PDone\n");
+    return true;
+ 
+}
+bool unpatchAMove()
+{
+    for (auto& a : curOffs.spatches)
+    {
+        if (!UnpatchWithMovAxRet(a.spatch, a.unpatch)) return false;
+    }
+    return true;
+}
 // Helper function to fetch raw property bytes from CNG
 bool GetKeyProperty(NCRYPT_KEY_HANDLE hKey, LPCWSTR pszProperty, std::vector<BYTE>& buffer) {
     DWORD cbResult = 0;
@@ -1907,7 +3091,7 @@ void ReadKeySddl(NCRYPT_KEY_HANDLE hKey) {
             LPWSTR pszSddl = nullptr;
 
             // 3. Convert the binary structure to a readable SDDL string
-            if (ConvertSecurityDescriptorToStringSecurityDescriptorW(pSecDesc, SDDL_REVISION_1, secInfo, &pszSddl, NULL)) {
+            if (pSecDesc!=0&&ConvertSecurityDescriptorToStringSecurityDescriptorW(pSecDesc, SDDL_REVISION_1, secInfo, &pszSddl, NULL)) {
                 std::wcout << L"Key Permissions (SDDL): " << pszSddl << std::endl;
                 LocalFree(pszSddl);
             }
@@ -1989,7 +3173,7 @@ SECURITY_STATUS NCryptOpenKeyFake(
     DWORD              dwLegacyKeySpec,
       DWORD              dwFlags)
 {
-   // std::wcout << "NCryptOpenKeyFake " << pszKeyName << std::endl;
+    std::wcout << "NCryptOpenKeyFake " << pszKeyName << std::endl;
     SECURITY_STATUS ret= NCryptOpenKey(hProvider, phKey, pszKeyName, dwLegacyKeySpec, dwFlags);
    // std::wcout << "NCryptOpenKeyFake result: " << ret << std::endl;
    // SetKeySecurity(*phKey);
@@ -2053,7 +3237,7 @@ SECURITY_STATUS NCryptEncryptFake(
             DWORD             dwFlags
 )
 {
-    printf("Enc key: %p cbinput %d\n", hKey, cbInput);
+    printf("Enc key: %p cbinput %ul\n", (void*) hKey, cbInput);
     std::cout << "input " << hexStr(pbInput, cbInput) << std::endl;
     SECURITY_STATUS ret=NCryptEncrypt(hKey, pbInput, cbInput, pPaddingInfo, pbOutput, cbOutput, pcbResult, dwFlags);
     std::wcout << "NCryptEncryptFake result: " << ret << std::endl;
@@ -2492,7 +3676,7 @@ void CopyFolderContents(const fs::path& src, const fs::path& dest)
 }
 std::string decrypt_get_dsn(const fs::path& input, const fs::path& output)
 {
-    std::string base64Str = ReadFileToString(input.string());
+    std::string base64Str = ReadFileToString(input);
     if (base64Str.empty())
     {
         std::cout << "[-] Error: Could not read input file or file is empty.\n";
@@ -2545,7 +3729,7 @@ std::string decrypt_get_dsn(const fs::path& input, const fs::path& output)
     }
     std::string ret=ParseDecryptedTextBlob(decryptedBlob);
     // 4. Save the decrypted plaintext to the output file
-    if (!WriteBufferToFile(output.string(), decryptedBlob.pbData, decryptedBlob.cbData)) 
+    if (!WriteBufferToFile(output, decryptedBlob.pbData, decryptedBlob.cbData)) 
     {
         std::cerr << "[-] Error: Failed to write decrypted data to output file.\n";
         LocalFree(decryptedBlob.pbData); // Ensure memory cleanup on failure
@@ -2557,53 +3741,6 @@ std::string decrypt_get_dsn(const fs::path& input, const fs::path& output)
     // 5. Clean up allocated DPAPI buffers
     LocalFree(decryptedBlob.pbData);
     return ret;
-}
-
-
-char* read_file(const char* filename, size_t& size)
-{
-    FILE* fp = fopen(filename, "rb");
-    if (fp == NULL)
-    {
-        perror("Error opening file");
-        return NULL;
-    }
-
-    if (fseek(fp, 0L, SEEK_END) != 0)
-    {
-        fclose(fp);
-        perror("Error seeking file end");
-        return NULL;
-    }
-
-    long long bufsize = _ftelli64(fp);
-    if (bufsize == -1)
-    {
-        fclose(fp);
-        perror("Error getting file size");
-        return NULL;
-    }
-    if (bufsize == 0)
-    {
-        return nullptr;
-    }
-    fseek(fp, 0L, SEEK_SET);
-    char* buffer = (char*)malloc(bufsize);
-    if (buffer == nullptr)
-    {
-        return NULL;
-    }
-    size_t len = fread(buffer, 1, bufsize, fp);
-    if (len == 0 || ferror(fp) != 0)
-    {
-        fclose(fp);
-        free(buffer);
-        perror("Error reading file");
-        return NULL;
-    }
-    fclose(fp);
-    size = len;
-    return buffer;
 }
 
 class BasicDecryptor
@@ -2670,6 +3807,7 @@ public:
     }
 };
 std::vector<uint8_t> drmionHeader = HexToBytes("ea44524d494f4eee");
+
 std::vector<uint8_t> fake = HexToBytes("e00100eaee9e8183de9a86be97de95848d50726f74656374656444617461852101882180ee03c4820189de03bea4eec981a7dec5a3be9a8e8e4143434f554e545f53454352455489434c49454e545f49449e834145538f8e944145532f4342432f504b43533550616464696e679f8a486d6163534841323536c0aea0ccbc90f3ac6e4a1a1f0352e9870a2801c287d651f942337aef0a21dfa95ae49cc1ae02cbe00100eaee9e8183de9a86be97de95848d50726f74656374656444617461852101882180ee02a481adde029fa28eb9616d7a6e312e64726d2d766f75636865722e76312e30303030303030302d303030302d303030302d303030302d30303030303030303030303096ae903992d248da68e4d3371739cf3711623295a87465737464617461f8aec0a2eddd1bd68d5fc98e60c2c915fe9b4bec38e23d98d41f10068ec3afe38002173facf2260318cdb8726b1b3a274ec529d000724d29a04bfc399848041eda5711b6eea781badea3b5885075726368617365b78e966174763a6b696e3a323a6447567a644752686447453dbdeed681bebed2ded0bb8e93636c69656e745f7265737472696374696f6e73bcbeb7de95b88d436c697070696e674c696d6974b98431353030de9eb88e9454657874546f53706565636844697361626c6564b98566616c7365");
 bool write_vector_to_file(const fs::path& target_path, const std::vector<uint8_t>& data) 
 {
@@ -2860,13 +3998,13 @@ static bool starts_with(const std::string& str, const char* prefix)
 
 struct DrmParameters
 {
-    std::string bookFile;
-    std::string shortBookFile;
+    fs::path bookFile;
+    fs::path shortBookFile;
 
-    std::list<std::string> resources;
-    std::list<std::string> shortResources;
+    std::list<fs::path> resources;
+    std::list<fs::path> shortResources;
 
-    std::list<std::string> vouchers;
+    std::list<fs::path> vouchers;
 };
 
 bool enumerateKindleFolder(const TCHAR* path, DrmParameters* out)
@@ -2879,7 +4017,8 @@ bool enumerateKindleFolder(const TCHAR* path, DrmParameters* out)
     HANDLE hFind = INVALID_HANDLE_VALUE;
     DWORD dwError = 0;
     std::basic_string<TCHAR> conv = path;// std::basic_string<TCHAR>(path.begin(), path.end());
-    std::string shortPath = std::string(conv.begin(), conv.end());
+    fs::path shortPath = fs::path(path);
+    //std::string shortPath = std::string(conv.begin(), conv.end());
     StringCchCopy(szDir, MAX_PATH, path);
     StringCchCat(szDir, MAX_PATH, TEXT("\\*"));
     hFind = FindFirstFile(szDir, &ffd);
@@ -2889,34 +4028,34 @@ bool enumerateKindleFolder(const TCHAR* path, DrmParameters* out)
     }
     do
     {
-        std::basic_string<TCHAR> wfname = ffd.cFileName;
-        std::string fname = std::string(wfname.begin(), wfname.end());
-        std::string fullname = shortPath + "\\" + fname;
-        if (ends_with(fname, ".azw"))
+        fs::path wfname = fs::path(ffd.cFileName);
+        //std::string fname = std::string(wfname.begin(), wfname.end());
+        const fs::path fullname = shortPath / wfname;
+        const std::wstring ext = fullname.extension().wstring();
+        if (ext==L".azw")
         {
             out->bookFile = fullname;
-            out->shortBookFile = fname;
+            out->shortBookFile = wfname;
             //std::cout << "Bookname " << fullname << std::endl;
             continue;
         }
-        if (ends_with(fname, ".voucher"))
+        if (ext == L".voucher")
         {
             out->vouchers.push_back(fullname);
             continue;
         }
-        if (ends_with(fname, ".res") || ends_with(fname, ".md"))
+        if (ext == L".res" || ext == L".md")
         {
             out->resources.push_back(fullname);
-            out->shortResources.push_back(fname);
+            out->shortResources.push_back(fs::path(wfname));
             //std::cout << "Resource " << fullname << std::endl;
             continue;
         }
 
     } while (FindNextFile(hFind, &ffd) != 0);
     FindClose(hFind);
-    if (out->bookFile.empty()) return false;
-    //if (out->vouchers.size() == 0) return false;
-    return true;
+  
+    return !out->bookFile.empty();
 
 }
 
@@ -2928,13 +4067,23 @@ int  tryOpeningBook(KrfAccessFunctions* ctx, const std::string& serial, const st
     memset((void*)sub, 0, sizeof(sub));
     std::list<std::string> secrets;
     secrets.push_back(secret);
-    ctx->DrmDataProvider((void*)sub, serial, secrets, params->vouchers);
+    std::list<std::string> cvouchers;
+    std::list<std::string> cres;
+    for (const auto& v : params->vouchers)
+    {
+        cvouchers.push_back(v.u8string());
+    }
+    for (const auto& v : params->resources)
+    {
+        cres.push_back(v.u8string());
+    }
+    ctx->DrmDataProvider((void*)sub, serial, secrets, cvouchers);
     void* bookFactory = ctx->GetBookFactory();
     std::shared_ptr<void*> rebook;
     krfErr err;
     err.code = 0;
     armed = true;
-    ctx->OpenBook(bookFactory, &rebook, params->bookFile, sub, &err, params->resources);
+    ctx->OpenBook(bookFactory, &rebook, params->bookFile.u8string(), sub, &err, cres);
     armed = false;
     if (err.code != 0)
     {
@@ -2991,6 +4140,17 @@ void accumulateOldSecrets(KrfAccessFunctions* ctx, const std::string& serial, st
 {
     if (oldSecretsAccumulated) return;
     std::cout << "Found KFX book that uses secrets, trying to accumulate older secrets" << std::endl;
+    std::list<std::string> cvouchers;
+    std::list<std::string> cres;
+    for (const auto& v : params->vouchers)
+    {
+        cvouchers.push_back(v.u8string());
+    }
+    for (const auto& v : params->resources)
+    {
+        cres.push_back(v.u8string());
+    }
+
     for (auto& secret : *secret_candidates)
     {
         keydataAccumulator.reset();
@@ -2998,13 +4158,13 @@ void accumulateOldSecrets(KrfAccessFunctions* ctx, const std::string& serial, st
         memset((void*)sub, 0, sizeof(sub));
         std::list<std::string> secrets;
         secrets.push_back(secret);
-        ctx->DrmDataProvider((void*)sub, serial, secrets, params->vouchers);
+        ctx->DrmDataProvider((void*)sub, serial, secrets,cvouchers);
         void* bookFactory = ctx->GetBookFactory();
         std::shared_ptr<void*> rebook;
         krfErr err;
         err.code = 0;
         armed = true;
-        ctx->OpenBook(bookFactory, &rebook, params->bookFile, sub, &err, params->resources);
+        ctx->OpenBook(bookFactory, &rebook, params->bookFile.u8string(), sub, &err, cres);
         armed = false;
 
         if (keydataAccumulator.old_secrets.size() > 0)
@@ -3023,33 +4183,120 @@ std::string hexhex(const std::string& st)
 {
     return hexStr((uint8_t*)st.c_str(), st.size());
 }
+std::wstring utf8_to_widechar(const char* str)
+{
+    int reqChars = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
+    //WCHAR* wStr = (WCHAR*)malloc(reqChars * sizeof(WCHAR));
+    std::wstring ret(reqChars, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str, -1, &ret[0], reqChars);
+    return ret;
+}
+std::string widechar_to_utf8(const std::wstring& wstr) {
+    if (wstr.empty()) 
+    {
+        return std::string();
+    }
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), (int)(wstr.length()), nullptr, 0, nullptr, nullptr);
+    if (size_needed <= 0) 
+    {
+       std::cout<< ("WideCharToMultiByte failed to calculate size.")<<std::endl;
+       return std::string();
+    }
+    std::string result(size_needed, 0);
 
-int processFile(const char* outputFile, const std::string& fname, const std::string& archivedName, BasicDecryptor* decr)
+    int result_size = WideCharToMultiByte(CP_UTF8, 0,wstr.c_str(),(int)(wstr.length()), &result[0], size_needed,nullptr, nullptr);
+
+    if (result_size <= 0) 
+    {
+        std::cout << "WideCharToMultiByte failed to convert string." << std::endl;
+        return std::string();
+    }
+
+    return result;
+}
+
+int rmz_stat64(const wchar_t* path, struct __stat64* buffer)
+{
+    int res = _wstat64(path, buffer);
+    return res;
+}
+mz_bool mz_open(mz_zip_archive* archive, const fs::path& filename, mz_uint level_and_flags, mz_zip_error* pErr)
+{
+
+    if (!archive) 
+    {
+        if (pErr) *pErr = MZ_ZIP_BUF_TOO_SMALL;
+        return false;
+    }
+    mz_zip_zero_struct(archive);
+    mz_bool status;
+    status = mz_zip_writer_init_file_v2(archive, filename.u8string().c_str(), 0, level_and_flags);
+    if (!status)
+    {
+        if (pErr) *pErr = archive->m_last_error;
+    }
+    return status;
+}
+mz_bool mz_add(mz_zip_archive* archive, const char* pArchive_name, const void* pBuf, size_t buf_size, mz_uint level_and_flags, mz_zip_error* pErr)
+{
+    mz_bool status;
+    status = mz_zip_writer_add_mem_ex(archive, pArchive_name, pBuf, buf_size, NULL, 0, level_and_flags, 0, 0);
+    if (pErr != NULL)
+    {
+        *pErr = archive->m_last_error;
+    }
+    return status;
+}
+mz_bool mz_close(mz_zip_archive* archive, mz_zip_error* pErr)
+{
+    mz_bool status=MZ_TRUE;
+    if (!archive)
+    {
+        if (pErr) *pErr = MZ_ZIP_BUF_TOO_SMALL;
+        return false;
+    }
+    /* Always finalize, even if adding failed for some reason, so we have a valid central directory. (This may not always succeed, but we can try.) */
+    if (!mz_zip_writer_finalize_archive(archive))
+    {
+        if (pErr) *pErr =archive->m_last_error;
+
+        status = MZ_FALSE;
+    }
+
+    if (!mz_zip_writer_end(archive))
+    {
+        if (pErr) *pErr = archive->m_last_error;
+
+        status = MZ_FALSE;
+    }
+    return status;
+}
+
+
+int processFile(mz_zip_archive* archive, const fs::path& fname, const std::string& archivedName, BasicDecryptor* decr)
 {
 
     size_t bl = 0;
-    char* buf = read_file(fname.c_str(), bl);
+    //char* buf =  /// read_file(fname.c_str(), bl);
+    std::vector<char> buf = ReadFileToVector(fname);
+    bl = buf.size();
     printf("Read file of %lu bytes\n", bl);
     if (bl == 0)
     {
         return 0;
     }
-    if (buf == nullptr)
-    {
-        printf("Could not read file? \n");
-        return 1;
-    }
-    if (bl > drmionHeader.size() && memcmp(&drmionHeader[0], buf, drmionHeader.size()) == 0)
+ 
+    if (bl > drmionHeader.size() && memcmp(&drmionHeader[0], &buf[0], drmionHeader.size()) == 0)
     {
         std::vector<uint8_t> outme;
         printf("Decrypting DRMION... \n");
         if (processDRMION(&buf[8], bl - 16, decr, outme))
         {
-            mz_bool status = mz_zip_add_mem_to_archive_file_in_place(outputFile, archivedName.c_str(), outme.data(), outme.size(), NULL, 0, MZ_BEST_COMPRESSION);
+            mz_zip_error err=MZ_ZIP_NO_ERROR;
+            mz_bool status = mz_add(archive, archivedName.c_str(), outme.data(), outme.size(), MZ_BEST_COMPRESSION,&err);
             if (!status)
             {
-                printf("mz_zip_add_mem_to_archive_file_in_place of DRMION file  failed!\n");
-                free(buf);
+                printf("mz_add of DRMION file  failed! Error: %s \n", mz_zip_get_error_string(err));
                 return EXIT_FAILURE;
             }
             printf("DRMION decrypted and saved.\n");
@@ -3057,24 +4304,116 @@ int processFile(const char* outputFile, const std::string& fname, const std::str
         else
         {
             printf("Could not decrypt DRMION? \n");
-            free(buf);
             return 2;
         }
     }
     else
     {
-        mz_bool status = mz_zip_add_mem_to_archive_file_in_place(outputFile, archivedName.c_str(), buf, bl, NULL, 0, MZ_BEST_COMPRESSION);
+      //  mz_zip_add_mem_to_archive_file_in_place_v2(pZip_filename, pArchive_name, pBuf, buf_size, pComment, comment_size, level_and_flags, NULL);
+        mz_zip_error err;
+        mz_bool status = mz_add(archive, archivedName.c_str(), &buf[0], bl, MZ_BEST_COMPRESSION, &err);
         if (!status)
         {
-            printf("mz_zip_add_mem_to_archive_file_in_place of non-DRM file  failed!\n");
-            free(buf);
+            printf("mz_add of non-DRM file failed for %s! Error: %s \n", archivedName.c_str(), mz_zip_get_error_string(err));
             return EXIT_FAILURE;
         }
     }
-
-    free(buf);
     return 0;
 }
+
+
+
+// taken from old alfcrypto... https://github.com/apprenticeharper/DeDRM_tools/blob/776f146ca00d11b24575f4fd6e8202df30a2b7ea/DeDRM_plugin/
+
+/// I am not touching Topaz format, on consideration...
+
+
+
+BookInterface* GetDecryptedBook(
+    const std::string& infile,
+    const std::vector<std::string>& kDatabases,
+    std::vector<std::string>& androidFiles,
+    std::vector<std::string>& serials,
+    std::vector<std::string>& pids,
+    std::chrono::time_point<std::chrono::steady_clock> starttime = std::chrono::steady_clock::now(),
+    const std::string& skeyfile = "",
+    bool remove_watermarks = true)
+{
+    // Check if file exists
+    std::ifstream f(infile.c_str(), std::ios::binary);
+    if (!f.good()) {
+        throw DrmException("Input file does not exist.");
+    }
+  
+    // Read first 8 bytes
+    char magic8[8] = { 0 };
+    f.read(magic8, 8);
+    std::string magic8_str(magic8, 8);
+    std::string compare((char*) & drmionHeader[0], 8);
+    if (magic8_str == compare) {
+        throw DrmException("The .kfx DRMION file cannot be decrypted by itself. A .kfx-zip archive containing a DRM voucher is required.");
+    }
+
+    bool mobi = true;
+    if (magic8_str.substr(0, 3) == "TPZ") {
+        mobi = false;
+    }
+    //uint16_t value = (static_cast<uint16_t>(self_sect[0x8]) << 8) | self_sect[0x9];
+    BookInterface* mb = nullptr;
+
+    if (magic8_str.substr(0, 4) == "PK\x03\x04") {
+        // mb = new KFXZipBook(infile, skeyfile);
+    }
+    else if (mobi) {
+        // mb = new MobiBook(infile, remove_watermarks);
+    }
+    else {
+        // mb = new TopazBook(infile);
+    }
+
+    // Fallback instantiation for compiling/testing placeholder
+    if (!mb) mb = new BookInterface();
+
+    
+        std::cout << "Decrypting " << mb->getBookType() << " ebook.\n";
+    
+    // Copy pids list
+    std::vector<std::string> totalpids = pids;
+
+    // Simulate getting android serials
+    for (const auto& aFile : androidFiles) {
+        // serials.insert(serials.end(), androidkindlekey::get_serials(aFile).begin(), androidkindlekey::get_serials(aFile).end());
+    }
+
+    std::pair<std::vector<char>, std::vector<char>> mdp = mb->getPIDMetaInfo();
+    // Simulate extending PID list
+    // auto extra_pids = kgenpids::getPidList(md1, md2, serials, kDatabases);
+    // totalpids.insert(totalpids.end(), extra_pids.begin(), extra_pids.end());
+
+    // Remove duplicates (simulate Python's list(set(totalpids)))
+    std::sort(totalpids.begin(), totalpids.end());
+    totalpids.erase(std::unique(totalpids.begin(), totalpids.end()), totalpids.end());
+
+    auto now = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsed = now - starttime;
+    std::cout << "Found " << totalpids.size() << " keys to try after " << elapsed.count() << " seconds\n";
+
+    try {
+        mb->processBook(totalpids);
+    }
+    catch (...) {
+        mb->cleanup();
+        delete mb; // Prevent memory leak on throw
+        throw;
+    }
+
+    now = std::chrono::steady_clock::now();
+    elapsed = now - starttime;
+    std::cout << "Decryption succeeded after " << elapsed.count() << " seconds\n";
+
+    return mb;
+}
+
 void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<std::string>* serial_candidates, std::set<std::string>* secret_candidates, std::string* k4ifile,const fs::path& fbook)
 {
     WIN32_FIND_DATA ffd;
@@ -3104,6 +4443,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
         }
     }
     {
+        afb = true;
         fs::path fb_path_v = fbook / "fake.voucher";
         fs::path fb_path_a = fbook / "fake.azw";
         write_vector_to_file(fb_path_v, fake);
@@ -3123,6 +4463,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
             }
 
         }
+        afb = false;
     }
     do
     {
@@ -3141,6 +4482,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                 KeyData acc;
                 bool opened = false;
                 bool invalid = false;
+                bool mobiProc = false;
                 mbox_saved = false;
                 // a silly optimization
                 for (auto& serial : working_serials)
@@ -3173,12 +4515,58 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                         if (code == 14)
                         {
                             invalid = true;
+                            std::cout << "Checking if the book is MOBI" << std::endl;
+                            fs::path mobipath = fs::path(params.bookFile);
+                            MobiBook mb(mobipath);
+                            if (!mb.init_done)
+                            {
+                                std::cout << "Seems like it is not, cannot decrypt. Might be Topaz?" << std::endl;
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    fs::path oname = params.shortBookFile;
+                                    oname.replace_extension(mb.getBookExtension());
+                                    fs::path out_path = fs::path(outdir) / oname;
+                                    if (fs::exists(out_path))
+                                    {
+                                        std::cout << "File " << oname << " already exists in the output folder" << std::endl;
+                                        std::cout << "Skipping" << std::endl;
+                                        mobiProc = true;
+                                    }
+                                    else 
+                                    {                                    
+                                    auto pdd = mb.getPIDMetaInfo();
+                                    invalid = false;
+                                    std::vector<std::string> sec;
+                                    for (auto osc : old_secrets)
+                                    {
+                                        sec.push_back(osc);
+                                    }
+                                    std::vector<std::string> pidz = getK4Pids(pdd.first, pdd.second, serial, sec);
+                                    mb.processBook(pidz);
+                                   
+                                    std::cout << "Looks like it processed... Saving to " << out_path << std::endl;
+
+                                    mb.writeFile(out_path);
+                                    mobiProc = true;
+                                    }
+
+                                }
+                                catch (DrmException e)
+                                {
+                                    std::cout << "Failed MOBI processing: " << e.what() << std::endl;
+                                }
+
+                            }
+
                             break;
                         }
                     }
                     if (opened || invalid)break;
                 }
-                if (!opened && !invalid)
+                if (!opened && !invalid && !mobiProc)
                 {
                     for (auto& serial : *serial_candidates)
                     {
@@ -3213,65 +4601,143 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                             if (code == 14)
                             {
                                 invalid = true;
+                                std::cout << "Checking if the book is MOBI" << std::endl;
+                                fs::path mobipath = fs::path(params.bookFile);
+                                MobiBook mb(mobipath);
+                                if (!mb.init_done)
+                                {
+                                    std::cout << "Seems like it is not, cannot decrypt. Might be Topaz?" << std::endl;
+                                }
+                                else
+                                {
+                                    try
+                                    {
+                                        fs::path oname = params.shortBookFile;
+                                        oname.replace_extension(mb.getBookExtension());
+                                        fs::path out_path = fs::path(outdir) /oname;
+                                        if (fs::exists(out_path))
+                                        {
+                                            std::cout << "File " << oname << " already exists in the output folder" << std::endl;
+                                            std::cout << "Skipping" << std::endl;
+                                            mobiProc = true;
+                                        }
+                                        else 
+                                        {
+                                        invalid = false;
+                                        auto pdd = mb.getPIDMetaInfo();
+                                        std::vector<std::string> sec;
+                                        for (auto osc : old_secrets)
+                                        {
+                                            sec.push_back(osc);
+                                        }
+                                        std::vector<std::string> pidz = getK4Pids(pdd.first, pdd.second, serial, sec);
+                                        mb.processBook(pidz);
+                                        
+                                        std::cout << "Looks like it processed... Saving to " << out_path << std::endl;
+
+                                        mb.writeFile(out_path);
+                                        mobiProc = true;
+                                        }
+                                        
+                                    }
+                                    catch (DrmException e)
+                                    {
+                                        std::cout << "Failed MOBI processing: " << e.what() << std::endl;
+                                    }
+
+                                }
                                 break;
                             }
                         }
-                        if (opened || invalid)break;
+                        if (opened || invalid) break;
                     }
                 }
-                if (invalid)
+                if (invalid&&!mobiProc)
                 {
-                    std::cout << "Invalid book format, maybe KF8/MOBI?" << std::endl;
+                    std::cout << "Invalid book format, maybe older format?" << std::endl;
                 }
-                if (!opened && !invalid)
+                if (mobiProc)
+                {
+                    std::cout << "Seemingly processed as MOBI " << std::endl;
+                }
+                if (!opened && !invalid && !mobiProc)
                 {
                     std::cout << "Could not open " << params.bookFile << std::endl;
 
                 }
                 if (opened)
                 {
-                    std::string output_name = outdir + std::string("\\") + remove_extension(base_name(params.shortBookFile)) + ".kfx-zip";
-                    BasicDecryptor* decr = nullptr;
-                    if (!mbox_saved && params.vouchers.size() == 0)
+                    //std::string output_name = outdir + std::string("\\") + remove_extension(base_name(params.shortBookFile)) + ".kfx-zip";
+                    fs::path oname = params.shortBookFile;
+                    oname.replace_extension(".kfx-zip");
+                    //fs::path(params.shortBookFile.replace_extension(mb.getBookExtension()))
+                    fs::path output_path = fs::path(outdir) / oname ;
+                    if (fs::exists(output_path))
                     {
-                        std::cout << "Found keyless book, packing it for completion" << std::endl;
-                        std::vector < uint8_t> key(16);//dummy key
-
-                        decr = (BasicDecryptor*)new AesDecryptor(key);
+                        std::cout << "File " << oname << " already exists in the output folder" << std::endl;
+                        std::cout << "Skipping" << std::endl;
                     }
                     else 
                     {
-                    if (acc.keys_128.size() == 0)
-                    {
-                        std::cout << "Book opened, but no book keys detected... Trying to use mbox" << std::endl;
-                        if (!mbox_saved)
+                        BasicDecryptor* decr = nullptr;
+                        if (!mbox_saved && params.vouchers.size() == 0)
                         {
-                            std::cout << "Mbox not saved either... Looks like opening actually failed? " << std::endl;
-                            opened = false;
-                        }
-                        decr = new MboxDecryptor();
-                    }
-                    else
-                    {
-                        std::cout << "Found key " << *acc.keys_128.begin() << ", trying to use clear AES" << std::endl;
-                        std::vector < uint8_t> key = HexToBytes(*acc.keys_128.begin());
+                            std::cout << "Found keyless book, packing it for completion" << std::endl;
+                            std::vector < uint8_t> key(16);//dummy key
 
-                        decr = (BasicDecryptor*)new AesDecryptor(key);
-                    }
-                    }
-                    if (opened)
-                    {
-                        std::cout << "Removal result " << std::remove(output_name.c_str()) << std::endl; //clear if exists
-                        processFile(output_name.c_str(), params.bookFile, params.shortBookFile, decr);
-                        auto it1 = params.resources.begin();
-                        auto it2 = params.shortResources.begin();
-                        while (it1 != params.resources.end() && it2 != params.shortResources.end())
-                        {
-                            processFile(output_name.c_str(), *it1, *it2, decr);
-                            ++it1;
-                            ++it2;
+                            decr = (BasicDecryptor*)new AesDecryptor(key);
                         }
-                        delete decr;
+                        else 
+                        {
+                        if (acc.keys_128.size() == 0)
+                        {
+                            std::cout << "Book opened, but no book keys detected... Trying to use mbox" << std::endl;
+                            if (!mbox_saved)
+                            {
+                                std::cout << "Mbox not saved either... Looks like opening actually failed? " << std::endl;
+                                opened = false;
+                            }
+                            decr = new MboxDecryptor();
+                        }
+                        else
+                        {
+                            std::cout << "Found key " << *acc.keys_128.begin() << ", trying to use clear AES" << std::endl;
+                            std::vector < uint8_t> key = HexToBytes(*acc.keys_128.begin());
+
+                            decr = (BasicDecryptor*)new AesDecryptor(key);
+                        }
+                        }
+                        if (opened)
+                        {
+                            std::cout << "Removal result " << std::remove(output_path.string().c_str()) << std::endl; //clear if exists
+                            mz_zip_archive arch;
+                            mz_zip_error err;
+                            if (!mz_open(&arch, output_path, MZ_BEST_COMPRESSION, &err))
+                            {
+                                std::wcout << output_path << std::endl;
+                                printf("Could not open zip file for output: %s \n", mz_zip_get_error_string(err));
+                            }
+                            else
+                            {
+                                processFile(&arch, params.bookFile, params.shortBookFile.u8string(), decr);
+                                auto it1 = params.resources.begin();
+                                auto it2 = params.shortResources.begin();
+                                while (it1 != params.resources.end() && it2 != params.shortResources.end())
+                                {
+                                    processFile(&arch, *it1, it2->u8string(), decr);
+                                    ++it1;
+                                    ++it2;
+                                }
+                                if (!mz_close(&arch, &err))
+                                {
+                                    printf("Could not close  zip file: %s \n", mz_zip_get_error_string(err));
+                                }
+
+                            }
+                           
+                            
+                            delete decr;
+                        }
                     }
 
                 }
@@ -3356,17 +4822,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
     return;
 }
 
-void writeFileBasic(const fs::path& filename, const std::vector<char>& data) 
-{
-    std::ofstream file(filename, std::ios::out | std::ios::binary);
-    if (!file) 
-    {
-        std::cout <<" Could not open file " << filename << " For writing "  << strerror(errno) << std::endl;
-        return;
-    }
-  //  std::cout << hexStr((uint8_t*) & data[0], 16) << std::endl;
-    file.write(data.data(), data.size());
-}
+
 void degenerateCopyFile(const fs::path& f1, const fs::path& f2)
 {
     if (f1 == f2) return;
@@ -3380,6 +4836,11 @@ void degenerateCopyNeededFiles(const fs::path& from, const std::vector<std::stri
     fs::create_directories(to);
     for (auto fl : files)
     {
+        //if (!fs::exists(fl))
+        //{
+         //   std::cout << "File " << fl << " does not exist, skipping?" << std::endl;
+        //    continue;
+        //}
         degenerateCopyFile(from/fs::path(fl),to/fs::path(fl));
     }
 }
@@ -3405,16 +4866,21 @@ std::vector<fs::path> find_valid_subfolders(const fs::path& dir_path)
 
     return subfolders;
 }
-int main(int argc, char* argv[])
+int wmain(int argc, wchar_t * argv[])
 {
     std::map<std::string, ExecOffsets> supportMap;
     supportMap["a03451fe70e83bee2a0e8979667cc2a6"] = KindleReader1_0_15230();
-    supportMap["8aa58a484f79ab467ae2a4d2999cc21f"] =  KindleReader1_0_16034();
+    supportMap["8aa58a484f79ab467ae2a4d2999cc21f"] = KindleReader1_0_16034();
     supportMap["db8035b8f8673ec4c3247161b5f57ded"] = KindleReader1_0_16118();
+    supportMap["2b13ee9cf40ebf26f3d14f4987b9b329"] = KindleReader1_0_18320();
+    supportMap["a5af62fd27d6cf599575ba0c1c112985"] = KindleReader1_0_18632();
+    supportMap["7a7f3827c80e19a4ebda38c2853eb590"] = KindleReader1_0_22326();
+    supportMap["5deec17cc97e250f1954a0c4b2c86005"] = KindleReader1_0_22920();
 
+   
     if (argc < 4)
     {
-        std::cout << "Usage: executable [kindle documents path (with _EBOK folders)] [output folder] [output k4i file] [folder with dlls(KatxopoApp)] -> all parameters optional" << std::endl;
+        std::cout << "Usage: executable [kindle documents path (with _EBOK folders)] [output folder] [output k4i file] [folder with dlls(KatxopoApp)] [k4i file, k4i file...]-> all parameters optional" << std::endl;
         std::cout << "Defaults are, in order, contents folder of the app in %APPDATA%/Local/Packages..etc, archived_kfx for folder and oldbooks.k4i" << std::endl;
         std::cout << "Defaults for folder with dll does not exist/ is installed dir" << std::endl;
         std::cout << "One can use \"default\" to fall back to default value, so don't name your file default, I guess." << std::endl;
@@ -3430,7 +4896,9 @@ int main(int argc, char* argv[])
     bool is_external_folder = false;
     fs::path external_load;
     if (argc >= 5)
-    {
+    {  
+        if(std::wstring(argv[4])!=L"default")
+        {
         external_load = fs::path(argv[4]);
 
         if (!fs::is_regular_file(external_load / L"dsx120.dll"))
@@ -3439,8 +4907,22 @@ int main(int argc, char* argv[])
             return -1;
         }
         is_external_folder = true;
+        }
     }
-
+    std::vector<fs::path> extra_k4i;
+    if (argc >= 6)
+    {
+        for (int a = 5; a < argc; a++)
+        {
+            fs::path ex = fs::path(argv[a]);
+            if (fs::is_regular_file(ex))
+            {
+                std::cout << "Adding k4i with additional credentials to test " << ex << std::endl;
+                extra_k4i.push_back(ex);
+            }
+            
+        }
+    }
     std::vector<basic_package_data> dat = FindPackagesViaRegistry(L"AmazonKindleReadingApp");
     if (dat.size() == 0&&!is_external_folder)
     {
@@ -3479,7 +4961,10 @@ int main(int argc, char* argv[])
     GetCurrentDirectoryW(MAX_PATH, old_cwd);
     fs::path current_dir = fs::path(old_cwd);
     std::vector<std::string> storage_files = { ".kinf2024", "main_shared.blob", "main_shared.salt","main_shared.blob.sha256"};
-    std::vector<std::string> dll_files = { "CFLite.dll", "concrt140_app.dll", "d3dcompiler_47.dll", "dsx120.dll", "hermes.dll", "icudt46.dll", "icudt65.dll", "icuin46.dll", "icuin65.dll", "icuio65.dll", "icuuc46.dll", "icuuc65.dll", "JavaScriptCore.dll", "libcrypto-1_1.dll", "libEGL.dll", "libfsdk_win32.dll", "libGLESv2.dll", "libjpeg.dll", "libpngKRF.dll", "libssl-1_1.dll", "LibWebCore.dll", "libxml2.dll", "Microsoft.ReactNative.dll", "Microsoft.Web.WebView2.Core.dll", "msvcp100.dll", "msvcp120.dll", "msvcp140.dll", "msvcp140_1_app.dll", "msvcp140_2_app.dll", "msvcp140_app.dll", "msvcr100.dll", "msvcr120.dll", "opengl32sw.dll", "Picker.dll", "pthreadVC2.dll", "Qt5Core.dll", "Qt5Gui.dll", "Qt5Multimedia.dll", "Qt5MultimediaWidgets.dll", "Qt5Network.dll", "Qt5OpenGL.dll", "Qt5Positioning.dll", "Qt5PrintSupport.dll", "Qt5Qml.dll", "Qt5Script.dll", "Qt5Sensors.dll", "Qt5Sql.dll", "Qt5Svg.dll", "Qt5WebChannel.dll", "Qt5WebSockets.dll", "Qt5Widgets.dll", "Qt5WinExtras.dll", "Qt5Xml.dll", "ReactNativeAsyncStorage.dll", "RNSVG.dll", "vcamp140_app.dll", "vccorlib120.dll", "vccorlib140.dll", "vccorlib140_app.dll", "vcomp140_app.dll", "vcruntime140.dll", "vcruntime140_app.dll", "WebCoreViewer.dll", "WebView2Loader.dll", "xrm120.dll", "zlib.dll", "zlib1.dll" };
+    std::vector<std::string> dll_files = { "CFLite.dll", "concrt140_app.dll", "d3dcompiler_47.dll", "dsx120.dll", "hermes.dll", "icudt46.dll", "icudt65.dll", "icuin46.dll", "icuin65.dll", "icuio65.dll", "icuuc46.dll", "icuuc65.dll", "JavaScriptCore.dll", "libcrypto-1_1.dll", "libEGL.dll", "libfsdk_win32.dll", "libGLESv2.dll", "libjpeg.dll", "libpngKRF.dll", "libssl-1_1.dll", "LibWebCore.dll", "libxml2.dll", "Microsoft.ReactNative.dll", "Microsoft.Web.WebView2.Core.dll", "msvcp100.dll", "msvcp120.dll", "msvcp140.dll", "msvcp140_1_app.dll", "msvcp140_2_app.dll", "msvcp140_app.dll", "msvcr100.dll", "msvcr120.dll", "opengl32sw.dll", "Picker.dll", "pthreadVC2.dll", "Qt5Core.dll", "Qt5Gui.dll", 
+                                           "Qt5Multimedia.dll", "Qt5MultimediaWidgets.dll", "Qt5Network.dll", "Qt5OpenGL.dll", "Qt5Positioning.dll", "Qt5PrintSupport.dll", 
+                                           "Qt5Qml.dll", "Qt5Script.dll", "Qt5Sensors.dll", "Qt5Sql.dll", "Qt5Svg.dll", "Qt5WebChannel.dll", "Qt5WebSockets.dll", "Qt5Widgets.dll", "Qt5WinExtras.dll", "Qt5Xml.dll", "ReactNativeAsyncStorage.dll", "RNSVG.dll", "vcamp140_app.dll", "vccorlib120.dll", "vccorlib140.dll", "vccorlib140_app.dll", "vcomp140_app.dll", "vcruntime140.dll", "vcruntime140_app.dll", "WebCoreViewer.dll", "WebView2Loader.dll", "xrm120.dll", 
+                                           "zlib.dll", "zlib1.dll","libpng16.dll"};
 
     // Check if the function call was successful.
     if (!SUCCEEDED(hr))
@@ -3556,7 +5041,7 @@ int main(int argc, char* argv[])
     }
     SetDllDirectoryW(load_path.wstring().c_str());
     std::wcout << "Success"  << std::endl;
-   
+    
     //debug...
     /*
     correctLatin1 = (fakeQLatin1)GetProcAddress(hlq, "?toLatin1@QString@@QGBE?AVQByteArray@@XZ");
@@ -3614,7 +5099,7 @@ int main(int argc, char* argv[])
     }
     else
     {
-        std::cout << "Detected installed Kindle version " << curOffs.version << std::endl;
+        std::cout << "Detected installed Kindle version " << fnd->second.version << std::endl;
     }
     curOffs = fnd->second;
     HINSTANCE hlq = LoadLibraryA("Qt5Core.dll");
@@ -3639,7 +5124,13 @@ int main(int argc, char* argv[])
    
     GetModuleFileNameA(hl, &buffer[0], buffer.size());
     std::cout << "Loaded dsx120 lib from: " << std::string(&buffer[0]) <<  std::endl;
-    std::cout << "Going back to cwd " << SetCurrentDirectoryW(current_dir.wstring().c_str())<<std::endl;
+    std::wcout << "Trying to move to " << data_folder << std::endl;
+    res = SetCurrentDirectoryW(data_folder.wstring().c_str());
+    if (!res)
+    {
+        std::wcout << "Move to data folder failed..." << std::endl;
+        return -3;
+    }
     void* plucene = GetProcAddress(hl, "?addFontDir@FontSetup@fontaccess@yj@@SAXV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
     printf("Lucene %p\n", plucene);
     if (plucene == NULL)
@@ -3650,8 +5141,12 @@ int main(int argc, char* argv[])
     int stoffset = (int)plucene - curOffs.luceneaddr;
     globoffs = stoffset;
     vpcall MakeKindleInfoStorage = (vpcall)(stoffset + curOffs.make_storage);
-    PatchWithMovAxRet();
+
+    patchAMove();
+
     void* kinfo = MakeKindleInfoStorage();
+
+
     printf("Kindle storage is %p\n", (void*)kinfo);
     if (kinfo == nullptr)
     {
@@ -3665,6 +5160,7 @@ int main(int argc, char* argv[])
     std::cout << "Storage hdata: "  << hdata->numBuckets << " nodesize: " << hdata->nodeSize <<" amount: "<< hdata->size << std::endl;
     std::map<std::string, std::string> strmap = QHashToMD5Map(hdata);
     std::string strtokens = strmap["495631f2946141093a7e333b85fa1a3d"];
+    std::cout << "Going back to cwd " << SetCurrentDirectoryW(current_dir.wstring().c_str()) << std::endl;
     /*toQString toQ = (toQString)GetProcAddress(hlq, "?fromStdString@QString@@SA?AV1@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
     fromQString fromQ = (fromQString)GetProcAddress(hlq, "?toStdString@QString@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
     if (strtokens.empty())
@@ -3686,7 +5182,8 @@ int main(int argc, char* argv[])
         return -5;
     }
     std::list<std::string> secrets = splitStringBySubstring(strtokens, ",");
-    UnpatchWithMovAxRet();
+    unpatchAMove();
+
     getPluginManager get_pm = (getPluginManager)(stoffset + curOffs.get_plugin_man);
     loadAllStaticModules load_pm = (loadAllStaticModules)(stoffset + curOffs.load_all);
     void* pm = get_pm();
@@ -3696,12 +5193,12 @@ int main(int argc, char* argv[])
     fs::path default_book_dir = fs::path(localcappdata) / L"Packages" / dat[0].family_name / L"LocalState" / L"Classic" / L"Content";
     if (argc >= 2)
     {
-        if(std::string(argv[1])!="default")  default_book_dir = current_dir / fs::path(argv[1]);
+        if(std::wstring(argv[1])!=L"default")  default_book_dir = current_dir / fs::path(argv[1]);
     }
     fs::path default_output = current_dir / "archived_kfx";
     if (argc >= 3)
     {
-        if (std::string(argv[2]) != "default")  default_output = current_dir / fs::path(argv[2]);
+        if (std::wstring(argv[2]) != L"default")  default_output = current_dir / fs::path(argv[2]);
     }
     std::cout <<"Book folder "<< default_book_dir << std::endl;
 
@@ -3719,13 +5216,105 @@ int main(int argc, char* argv[])
   
     if (argc >= 4)
     {
-        if (std::string(argv[3]) != "default") k4path = current_dir / fs::path(argv[3]);
+        if (std::wstring(argv[3]) != L"default") k4path = current_dir / fs::path(argv[3]);
     }
     std::string kfile = k4path.string();
     std::cout << "Target k4i file" << kfile << std::endl;
     //Add fake book enumm for secrets
     fs::path fb_path = data_folder / "fb";
-    
+    if (extra_k4i.size() > 0)
+    {
+        for (auto fl : extra_k4i)
+        {
+            std::vector<char> dat = ReadFileToVector(fl);
+            if (dat.size() < 3) continue;
+            std::cout << "Parsing " << fl << std::endl;
+            try {
+                const char* rawJsonStr = reinterpret_cast<const char*>(&dat[0]);
+
+                json data = json::parse(dat.begin(), dat.end());
+
+                // Access properties safely
+                std::cout << "k4i JSON successfully parsed!" << std::endl;
+                if (data.contains("DSN"))
+                {
+                    std::string hexdsn = data["DSN"];
+                    std::vector<char> deh = HexToBytesC(hexdsn);
+                    std::string ldsn(deh.begin(),deh.end());
+                    serial_candidates.insert(ldsn);
+                    std::cout << "Adding serial candidate " << ldsn << std::endl;
+                }
+                if (data.contains("DSN_clear"))
+                {
+                    std::string ldsn = data["DSN_clear"];
+                    serial_candidates.insert(ldsn);
+                    std::cout << "Adding serial candidate " << ldsn << std::endl;
+                }
+                if (data.contains("extra.dsns"))
+                {
+                    for (auto obj : data["extra.dsns"])
+                    {
+                        std::string hexdsn = obj;
+                        std::vector<char> deh = HexToBytesC(hexdsn);
+                        std::string ldsn(deh.begin(), deh.end());
+                        serial_candidates.insert(ldsn);
+                        std::cout << "Adding serial candidate " << ldsn << std::endl;
+                    }
+                }
+                if (data.contains("extra.dsns_clear"))
+                {
+                    for (auto obj : data["extra.dsns_clear"])
+                    {
+                        std::string ldsn=obj;
+                        serial_candidates.insert(ldsn);
+                        std::cout << "Adding serial candidate " << ldsn << std::endl;
+                    }
+                }
+                if (data.contains("kindle.account.tokens"))
+                {
+                    std::string hextok = data["kindle.account.tokens"];
+                    std::vector<char> deh = HexToBytesC(hextok);
+                    std::string ltok(deh.begin(), deh.end());
+                    secret_candidates.insert(ltok);
+                    std::cout << "Adding secret candidate " << ltok << std::endl;
+                }
+                if (data.contains("kindle.account.secrets"))
+                {
+                    for (auto obj : data["kindle.account.secrets"])
+                    {
+                        std::string hextok = obj;
+                        std::vector<char> deh = HexToBytesC(hextok);
+                        std::string ltok(deh.begin(), deh.end());
+                        secret_candidates.insert(ltok);
+                        std::cout << "Adding secret candidate " << ltok << std::endl;
+                    }
+                }
+                if (data.contains("kindle.account.new_secrets"))
+                {
+                    for (auto obj : data["kindle.account.new_secrets"])
+                    {
+                        std::string ltok=obj;
+                        secret_candidates.insert(ltok);
+                        std::cout << "Adding secret candidate " << ltok << std::endl;
+                    }
+                }
+                if (data.contains("kindle.account.clear_old_secrets"))
+                {
+                    for (auto obj : data["kindle.account.clear_old_secrets"])
+                    {
+                        std::string ltok = obj;
+                        secret_candidates.insert(ltok);
+                        std::cout << "Adding secret candidate " << ltok << std::endl;
+                    }
+                }
+                
+            }
+            catch (const json::parse_error& e)
+            {
+                std::cerr << "Malformed text inside k4i file  " << e.what() << "  " << fl << std::endl;
+            }
+        }
+    }
     enumerateKindleDir(default_book_dir.wstring().c_str(), default_output.string(), &serial_candidates, &secret_candidates, &kfile,fb_path);
  
     return 0;
