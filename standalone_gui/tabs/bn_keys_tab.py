@@ -81,7 +81,7 @@ class BNKeysTab(QWidget):
     def _on_scan(self):
         self._scan_worker = KeyScanWorker(KeyScanWorker.MODE_BN)
         self._scan_worker.log_msg.connect(lambda m: None)
-        self._scan_worker.finished.connect(self._on_scan_done)
+        self._scan_worker.found_keys.connect(self._on_scan_done)
         self._scan_worker.start()
 
     def _on_scan_done(self, category, keys, names):

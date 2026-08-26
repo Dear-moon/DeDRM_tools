@@ -88,7 +88,7 @@ class KindleKeysTab(QWidget):
     def _on_scan(self):
         self._scan_worker = KeyScanWorker(KeyScanWorker.MODE_KINDLE)
         self._scan_worker.log_msg.connect(self._log)
-        self._scan_worker.finished.connect(self._on_scan_done)
+        self._scan_worker.found_keys.connect(self._on_scan_done)
         self._scan_worker.start()
 
     def _log(self, msg):
