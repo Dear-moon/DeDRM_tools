@@ -20,6 +20,7 @@
 | Kindle UWP / MS Store | `.kfx-zip` (CONT 容器) | **`kfxlib` (零依赖)** | `.epub` |
 | 亚马逊 "下载并传输至USB" | `.azw3` | `mobidedrm` | `.azw3` |
 | Adobe Digital Editions | `.epub` `.pdf` | `ineptepub` / `ineptpdf` | `.epub` / `.pdf` |
+| Adobe ACSM（兑现） | `.acsm` | `acsm` → `ineptepub` / `ineptpdf` | `.epub` / `.pdf` |
 | B&N / Nook | `.epub` | `ineptepub` (PassHash) | `.epub` |
 | Readium LCP | `.epub` | `lcpdedrm` | `.epub` |
 
@@ -39,7 +40,7 @@
 
 ### Adobe / B&N / LCP
 
-在 **Adobe Keys** / **B&N Keys** Tab 扫描或导入密钥。拖入 `.epub`/`.pdf` → Decrypt。
+在 **Adobe Keys** / **B&N Keys** Tab 扫描或导入密钥。Adobe DRM 书需先在 **Adobe Account (ACSM)** 区注册或导入 ADE 账号，然后拖入 `.acsm`（兑现 → 解密）或 `.epub`/`.pdf` → Decrypt。
 
 ## 密钥提取（Refresh Keys）
 
@@ -56,7 +57,7 @@
 
 | 拖入文件 | 行为 |
 |---------|------|
-| `.azw` `.epub` `.pdf` `.kfx` `.mobi` `.kfx-zip` | 填入 Decrypt Tab |
+| `.azw` `.epub` `.pdf` `.kfx` `.mobi` `.kfx-zip` `.acsm` | 填入 Decrypt Tab |
 | `.k4i` | 导入 Kindle 账户密钥 |
 | `.der` | 导入 Adobe ADE 密钥 |
 | `.b64` | 导入 B&N 密钥 |
@@ -68,7 +69,7 @@
 |-----|------|
 | **Decrypt** | 文件选择、类型检测、解密、日志、一键刷新密钥 |
 | **Kindle Keys** | 扫描/导入 K4PC 密钥、手动输入序列号/PID |
-| **Adobe Keys** | 扫描/导入 ADE 密钥、PDF 密码管理 |
+| **Adobe Keys** | 扫描/导入 ADE 密钥、PDF 密码管理、ACSM 账号（注册/导入 ADE 激活） |
 | **B&N Keys** | 扫描/生成 Nook PassHash 密钥 |
 | **Serials & PIDs** | Kindle 序列号、eReader PID |
 | **Settings** | 字体去混淆、水印移除、KFX voucher 路径 |
