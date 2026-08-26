@@ -12,6 +12,7 @@
 /build/
 /dist/
 *.spec
+!dedrm_gui.spec
 
 # Python cache
 __pycache__/

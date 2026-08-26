@@ -20,6 +20,7 @@ First use: click **Refresh Keys** once (auto-extracts keys from installed Kindle
 | Kindle UWP / MS Store | `.kfx-zip` (CONT container) | **`kfxlib` (zero deps)** | `.epub` |
 | Amazon "Download & transfer via USB" | `.azw3` | `mobidedrm` | `.azw3` |
 | Adobe Digital Editions | `.epub` `.pdf` | `ineptepub` / `ineptpdf` | `.epub` / `.pdf` |
+| Adobe ACSM (fulfillment) | `.acsm` | `acsm` → `ineptepub` / `ineptpdf` | `.epub` / `.pdf` |
 | B&N / Nook | `.epub` | `ineptepub` (PassHash) | `.epub` |
 | Readium LCP | `.epub` | `lcpdedrm` | `.epub` |
 
@@ -39,7 +40,7 @@ Enter serial in **Serials & PIDs Tab**. Copy book folder from device via USB. Dr
 
 ### Adobe / B&N / LCP
 
-Use **Adobe Keys** / **B&N Keys** tabs to scan or import keys. Drag `.epub`/`.pdf` → Decrypt.
+Use **Adobe Keys** / **B&N Keys** tabs to scan or import keys. For Adobe DRM books, register or import an ADE account in the **Adobe Account (ACSM)** section, then drag `.acsm` (fulfills → decrypts) or `.epub`/`.pdf` → Decrypt.
 
 ## Key Extraction (Refresh Keys)
 
@@ -56,7 +57,7 @@ Collected keys are automatically de-duplicated and imported.
 
 | File | Action |
 |------|--------|
-| `.azw` `.epub` `.pdf` `.kfx` `.mobi` `.kfx-zip` | Load into Decrypt Tab |
+| `.azw` `.epub` `.pdf` `.kfx` `.mobi` `.kfx-zip` `.acsm` | Load into Decrypt Tab |
 | `.k4i` | Import Kindle account key |
 | `.der` | Import Adobe ADE key |
 | `.b64` | Import B&N key |
@@ -68,7 +69,7 @@ Collected keys are automatically de-duplicated and imported.
 |-----|---------|
 | **Decrypt** | File input, type detection, decrypt, log, Refresh Keys |
 | **Kindle Keys** | Scan/import K4PC keys, manual serial/PID |
-| **Adobe Keys** | Scan/import ADE keys, PDF passwords |
+| **Adobe Keys** | Scan/import ADE keys, PDF passwords, ACSM account (register/import ADE activation) |
 | **B&N Keys** | Scan/generate Nook PassHash keys |
 | **Serials & PIDs** | Kindle serial numbers, eReader PIDs |
 | **Settings** | Font deobfuscation, watermark removal, KFX voucher path |
