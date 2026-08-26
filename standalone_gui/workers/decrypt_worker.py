@@ -56,6 +56,11 @@ class DecryptWorker(QThread):
         with open(filepath, 'rb') as f:
             header = f.read(100)
 
+        # ACSM is an XML token (Adobe Content Server fulfillment), not a binary
+        # magic — detect by extension + leading '<'.
+        if filepath.lower().endswith('.acsm') and header.lstrip().startswith(b'<'):
+            return 'ACSM'
+
         if header.startswith(MAGIC_PDF):
             return 'PDF'
 
@@ -143,6 +148,8 @@ class DecryptWorker(QThread):
                 success = self._decrypt_lcp()
             elif ftype == 'PDB':
                 success = self._decrypt_ereader()
+            elif ftype == 'ACSM':
+                success = self._decrypt_acsm()
             elif ftype == 'ZIP':
                 self._log('Error: This appears to be a regular ZIP (no DRM detected)')
                 self.finished.emit(False, '')
@@ -448,6 +455,43 @@ class DecryptWorker(QThread):
                 self._log('Watermarks removed')
             except Exception as e:
                 self._log(f'Watermark removal error (non-fatal): {e}')
+
+    # --- ACSM (Adobe Content Server) ---
+    def _decrypt_acsm(self):
+        """Fulfill an .acsm into an encrypted book, then decrypt it by reusing
+        the existing ADEPT (epub) / PDF decrypt paths. Needs a registered ADE
+        account trio in config.get_acsm_account_dir()."""
+        account_dir = self.config.get_acsm_account_dir()
+        if not account_dir or not all(
+            os.path.isfile(os.path.join(account_dir, f))
+            for f in ('devicesalt', 'device.xml', 'activation.xml')
+        ):
+            self._log('No Adobe account activation found. Use the "Adobe Keys" tab '
+                      '→ Adobe Account (ACSM) to Register/Import, then retry.')
+            return False
+
+        try:
+            from DeDRM_plugin.acsm import fulfill_acsm
+        except Exception as e:
+            self._log(f'ACSM module unavailable: {e}')
+            return False
+
+        try:
+            enc_path = fulfill_acsm(self.input_path, account_dir)
+        except Exception as e:
+            self._log(f'ACSM fulfillment failed: {e}')
+            return False
+
+        self._log(f'Fulfilled to encrypted book: {enc_path}')
+        self.input_path = enc_path
+
+        ftype = self._detect_type(enc_path)
+        if ftype in ('ADEPT', 'ADEPT-PassHash'):
+            return self._decrypt_adobe_epub()
+        if ftype == 'PDF':
+            return self._decrypt_pdf()
+        self._log(f'Fulfilled file type not recognized: {ftype}')
+        return False
 
     # --- LCP (DMCA'd) ---
     def _decrypt_lcp(self):

@@ -8,9 +8,41 @@ from PyQt6.QtWidgets import (
     QLabel, QMessageBox, QFileDialog, QDialog, QDialogButtonBox,
     QCheckBox, QVBoxLayout as DVBox, QListWidget,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from standalone_gui.workers.key_scan_worker import KeyScanWorker
+
+
+class AcsmAccountWorker(QThread):
+    """Network worker for ADE account registration / import (ACSM fulfillment)."""
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, op, config, account_dir, email='', password='', parent=None):
+        super().__init__(parent)
+        self.op = op
+        self.config = config
+        self.account_dir = account_dir
+        self.email = email
+        self.password = password
+
+    def run(self):
+        from DeDRM_plugin.acsm import register_account, import_ade_account, export_ade_key
+        try:
+            if self.op == 'import_ade':
+                import_ade_account(self.account_dir)
+                name = 'ADE imported'
+            elif self.op == 'register_adobeid':
+                register_account('AdobeID', self.email, self.password, self.account_dir)
+                name = self.email or 'AdobeID'
+            else:  # anonymous
+                register_account('anonymous', '', '', self.account_dir)
+                name = 'Anonymous account'
+            der = export_ade_key(self.account_dir)
+            key_hex = codecs.encode(der, 'hex').decode('ascii')
+            self.config.add_adept_key(name, key_hex)
+            self.finished.emit(True, 'Account ready: ' + name)
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
 
 class AdobeKeysTab(QWidget):
@@ -23,6 +55,28 @@ class AdobeKeysTab(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+
+        # Adobe account (ACSM fulfillment) management
+        acsm_gb = QGroupBox('Adobe Account (ACSM fulfillment)')
+        al = QVBoxLayout(acsm_gb)
+        self.acsm_status = QLabel()
+        self.acsm_status.setWordWrap(True)
+        al.addWidget(self.acsm_status)
+        arow = QHBoxLayout()
+        imp_btn = QPushButton('Import from installed ADE')
+        imp_btn.clicked.connect(lambda: self._start_acsm_op('import_ade'))
+        arow.addWidget(imp_btn)
+        anon_btn = QPushButton('Register anonymous')
+        anon_btn.clicked.connect(lambda: self._start_acsm_op('anonymous'))
+        arow.addWidget(anon_btn)
+        adobeid_btn = QPushButton('Register AdobeID…')
+        adobeid_btn.clicked.connect(self._on_register_adobeid)
+        arow.addWidget(adobeid_btn)
+        arow.addStretch()
+        al.addLayout(arow)
+        layout.addWidget(acsm_gb)
+
+        self._refresh_acsm_status()
 
         # Key management
         btn_row = QHBoxLayout()
@@ -139,3 +193,40 @@ class AdobeKeysTab(QWidget):
             self.config.add_adobe_pdf_passphrase(pw)
             self.pw_edit.clear()
             self._refresh_tables()
+
+    # --- ACSM account (Adobe Content Server fulfillment) ---
+    def _refresh_acsm_status(self):
+        d = self.config.get_acsm_account_dir()
+        st = self.config.get_acsm_account_status()
+        present = [k for k, v in st.items() if v]
+        self.acsm_status.setText(
+            'Account dir: {}\nFiles: {}'.format(
+                d, ', '.join(present) if present else 'none (not activated)'))
+
+    def _start_acsm_op(self, op, email='', password=''):
+        d = self.config.get_acsm_account_dir()
+        self._acsm_worker = AcsmAccountWorker(op, self.config, d, email, password)
+        self._acsm_worker.finished.connect(self._on_acsm_op_done)
+        self._acsm_worker.start()
+
+    def _on_register_adobeid(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle('Register AdobeID')
+        dl = DVBox(dlg)
+        e = QLineEdit(); e.setPlaceholderText('AdobeID email')
+        p = QLineEdit(); p.setPlaceholderText('Password')
+        p.setEchoMode(QLineEdit.EchoMode.Password)
+        dl.addWidget(e); dl.addWidget(p)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept); btns.rejected.connect(dlg.reject)
+        dl.addWidget(btns)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._start_acsm_op('register_adobeid', e.text().strip(), p.text())
+
+    def _on_acsm_op_done(self, ok, msg):
+        self._refresh_acsm_status()
+        self._refresh_tables()
+        if ok:
+            QMessageBox.information(self, 'ACSM Account', msg)
+        else:
+            QMessageBox.warning(self, 'ACSM Account', 'Error: ' + msg)

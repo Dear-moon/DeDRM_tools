@@ -92,7 +92,7 @@ class DecryptTab(QWidget):
     def _browse_input(self):
         path, _ = QFileDialog.getOpenFileName(
             self, 'Select encrypted ebook',
-            '', 'Ebooks (*.epub *.pdf *.mobi *.azw *.azw3 *.azw4 *.prc *.tpz *.kfx *.kfx-zip *.pdb);;All Files (*)'
+            '', 'Ebooks (*.epub *.pdf *.mobi *.azw *.azw3 *.azw4 *.prc *.tpz *.kfx *.kfx-zip *.pdb);;ACSM (*.acsm);;All Files (*)'
         )
         if path:
             self.input_edit.setText(path)
@@ -151,6 +151,8 @@ class DecryptTab(QWidget):
             self.output_edit.setText(base + '_nodrm' + ext)
 
     def _sniff(self, header, filepath):
+        if filepath.lower().endswith('.acsm') and header.lstrip().startswith(b'<'):
+            return 'ACSM'
         if header.startswith(b'%PDF'):
             return 'PDF'
         if header.startswith(b'CONT'):
@@ -202,6 +204,9 @@ class DecryptTab(QWidget):
     def _count_keys(self, ftype):
         if not ftype:
             return 0
+        if 'ACSM' in ftype:
+            # ACSM fulfills via a registered ADE account; report ADE keys as proxy
+            return len(self.config.get_adept_keys())
         if 'PDF' in ftype or 'ADEPT' in ftype:
             return len(self.config.get_adept_keys()) + len(self.config.get_bandn_keys())
         if 'Kindle' in ftype or 'KFX' in ftype or 'MOBI' in ftype or 'TPZ' in ftype:

@@ -100,3 +100,19 @@ class AppConfig:
 
     def get_remove_watermarks(self):
         return self._cfg().get('remove_watermarks', True)
+
+    # --- ACSM (Adobe Content Server) account ---
+    def get_acsm_account_dir(self):
+        return self._cfg().get('acsm_account_dir',
+                               os.path.join(_default_config_dir, 'acsm_account'))
+
+    def set_acsm_account_dir(self, path):
+        self.prefs.set('acsm_account_dir', path)
+        self._cfg().commit()
+
+    def get_acsm_account_status(self):
+        d = self.get_acsm_account_dir()
+        return {
+            f: os.path.isfile(os.path.join(d, f))
+            for f in ('devicesalt', 'device.xml', 'activation.xml')
+        }

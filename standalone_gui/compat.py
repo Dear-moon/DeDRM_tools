@@ -63,3 +63,20 @@ for name in _OPTIONAL:
         _preload(name)
     except Exception:
         pass
+
+# ACSM (Adobe Content Server) fulfillment — de-Calibred acsm-calibre-plugin core.
+# Order: leaf modules first (dependency-ordered). 'prefs' is registered as
+# 'acsm.prefs' — never aliased to the bare short name 'prefs', which already
+# aliases DeDRM_plugin.prefs. Some modules are Windows-only and guarded.
+_ACSM_MODULES = [
+    'acsm.prefs', 'acsm.customRSA', 'acsm.cpuid', 'acsm.libpdf', 'acsm.libadobe',
+    'acsm.libadobeAccount', 'acsm.libadobeFulfill', 'acsm.getEncryptionKeyWindows',
+    'acsm.libadobeImportAccount', 'acsm.fulfill', 'acsm.register_ADE_account',
+    'acsm.get_key_from_Adobe',
+]
+
+for name in _ACSM_MODULES:
+    try:
+        _preload(name)
+    except Exception:
+        pass

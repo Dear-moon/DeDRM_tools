@@ -24,7 +24,7 @@ from standalone_gui.tabs.settings_tab import SettingsTab
 
 # File extensions that go to the Decrypt tab
 _EBOOK_EXTS = {'.azw', '.azw3', '.azw4', '.azw8', '.mobi', '.prc',
-               '.tpz', '.kfx', '.kfx-zip', '.epub', '.pdf', '.pdb', '.pobi'}
+               '.tpz', '.kfx', '.kfx-zip', '.epub', '.pdf', '.pdb', '.pobi', '.acsm'}
 # Key files
 _KEY_EXTS = {'.k4i', '.der', '.b64'}
 
