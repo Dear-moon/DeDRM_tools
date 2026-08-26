@@ -48,3 +48,12 @@ storage_dump.bin
 # Compiled tools (not tracked — built from source)
 Other_Tools/KRFKeyExtractor/*.exe
 Other_Tools/KRFKeyExtractor/*.obj
+
+# Release packages (built by make_release.py / GitHub auto-packages tags)
+*.zip
+
+# Legacy debug spec (references a no-longer-present _frozen_scan_probe.py)
+/dscan.spec
+
+# Local Kobo design notes (not for redistribution)
+Other_Tools/Kobo/
