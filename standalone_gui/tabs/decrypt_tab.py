@@ -5,12 +5,15 @@ import json
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLineEdit, QPushButton, QLabel, QProgressBar,
-    QPlainTextEdit, QFileDialog, QMessageBox,
+    QPlainTextEdit, QFileDialog, QMessageBox, QListWidget,
+    QListWidgetItem, QAbstractItemView, QCheckBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor
 
 from standalone_gui.workers.decrypt_worker import DecryptWorker
 from standalone_gui.workers.key_scan_worker import KeyScanWorker
+from standalone_gui.workers.uwp_library_worker import UwpLibraryWorker
 
 
 class DecryptTab(QWidget):
@@ -21,6 +24,9 @@ class DecryptTab(QWidget):
         self.config = config
         self._worker = None
         self._scan_worker = None
+        self._uwp_scan_worker = None
+        self._uwp_decrypt_worker = None
+        self._uwp_books = {}
         self._init_ui()
 
     def _init_ui(self):
@@ -52,6 +58,43 @@ class DecryptTab(QWidget):
         fl.addLayout(row2)
 
         layout.addWidget(file_group)
+
+        # UWP Kindle Library
+        uwp_gb = QGroupBox('UWP Kindle Library')
+        vl = QVBoxLayout(uwp_gb)
+
+        uwp_row1 = QHBoxLayout()
+        self.uwp_scan_btn = QPushButton('Scan Library')
+        self.uwp_scan_btn.setToolTip('Scan the Microsoft Store Kindle content dir for downloaded books')
+        self.uwp_scan_btn.clicked.connect(self._on_uwp_scan)
+        uwp_row1.addWidget(self.uwp_scan_btn)
+        uwp_row1.addWidget(QLabel('Save to:'))
+        self.uwp_out_edit = QLineEdit()
+        self.uwp_out_edit.setPlaceholderText('Output dir for decrypted .epub (default Documents)')
+        uwp_row1.addWidget(self.uwp_out_edit, 1)
+        uwp_out_btn = QPushButton('Browse...')
+        uwp_out_btn.clicked.connect(self._on_uwp_choose_out)
+        uwp_row1.addWidget(uwp_out_btn)
+        vl.addLayout(uwp_row1)
+
+        self.uwp_list = QListWidget()
+        self.uwp_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.uwp_list.setToolTip('Check books to decrypt')
+        vl.addWidget(self.uwp_list)
+
+        uwp_row3 = QHBoxLayout()
+        self.uwp_decrypt_btn = QPushButton('Decrypt Selected')
+        self.uwp_decrypt_btn.setEnabled(False)
+        self.uwp_decrypt_btn.clicked.connect(self._on_uwp_decrypt)
+        uwp_row3.addWidget(self.uwp_decrypt_btn)
+        self.uwp_cleanup_cb = QCheckBox('Delete C:\\Data temp dir')
+        self.uwp_cleanup_cb.setChecked(True)
+        self.uwp_cleanup_cb.setToolTip('MSIXKFXArchiver creates a ~400MB C:\\Data dir; remove it after running')
+        uwp_row3.addWidget(self.uwp_cleanup_cb)
+        uwp_row3.addStretch()
+        vl.addLayout(uwp_row3)
+
+        layout.addWidget(uwp_gb)
 
         # Info line + Refresh
         info_row = QHBoxLayout()
@@ -353,4 +396,106 @@ class DecryptTab(QWidget):
             )
 
         self.refresh()
+
+    # --- UWP Kindle Library ---
+
+    def _on_uwp_choose_out(self):
+        start = self.uwp_out_edit.text() or os.path.expanduser('~')
+        d = QFileDialog.getExistingDirectory(self, 'Select output directory', start)
+        if d:
+            self.uwp_out_edit.setText(d)
+
+    def _on_uwp_scan(self):
+        self.uwp_scan_btn.setEnabled(False)
+        self._append_log('Scanning UWP Kindle library...')
+        self._uwp_scan_worker = UwpLibraryWorker(UwpLibraryWorker.MODE_SCAN, self.config)
+        self._uwp_scan_worker.log_msg.connect(self._append_log)
+        self._uwp_scan_worker.found_books.connect(self._on_uwp_found_books)
+        self._uwp_scan_worker.scan_done.connect(self._on_uwp_scan_done)
+        self._uwp_scan_worker.start()
+
+    def _on_uwp_found_books(self, books):
+        self.uwp_list.clear()
+        self._uwp_books = {}
+        for b in books:
+            self._uwp_books[b['asin']] = b
+            suffix = '' if b['is_kfx'] else '  [not KFX]'
+            it = QListWidgetItem(f"{b['title']}  ({b['asin']}){suffix}")
+            it.setData(Qt.ItemDataRole.UserRole, b['asin'])
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Unchecked)
+            self.uwp_list.addItem(it)
+        enabled = any(b['is_kfx'] and b['complete'] for b in books)
+        self.uwp_decrypt_btn.setEnabled(enabled)
+        if not enabled and books:
+            self._append_log('No decryptable (KFX + complete) books found; check the [not KFX] rows.')
+
+    def _on_uwp_scan_done(self, ok, msg):
+        self.uwp_scan_btn.setEnabled(True)
+        if not ok:
+            QMessageBox.information(
+                self, 'UWP Library',
+                'No Microsoft Store Kindle library found.\n\n'
+                'This only works on Windows with the Store (UWP) Kindle app installed, '
+                'signed in, and at least one book downloaded.')
+            self._append_log(f'UWP scan failed: {msg}')
+
+    def _on_uwp_decrypt(self):
+        selected = [
+            self.uwp_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.uwp_list.count())
+            if self.uwp_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+        if not selected:
+            QMessageBox.warning(self, 'UWP Library', 'Select at least one book to decrypt')
+            return
+        if not self.uwp_out_edit.text().strip():
+            self.uwp_out_edit.setText(os.path.join(os.path.expanduser('~'), 'Documents'))
+        if self.uwp_cleanup_cb.isChecked():
+            QMessageBox.information(
+                self, 'UWP Library',
+                'MSIXKFXArchiver creates a temporary C:\\Data dir (~400MB).\n'
+                'It will be removed after the run (checked the cleanup option).')
+        self.uwp_decrypt_btn.setEnabled(False)
+        self.uwp_scan_btn.setEnabled(False)
+        self._append_log(f'Decrypting {len(selected)} book(s)...')
+        self._uwp_decrypt_worker = UwpLibraryWorker(
+            UwpLibraryWorker.MODE_DECRYPT, self.config,
+            content_dir=None,
+            selected_asins=selected,
+            output_dir=self.uwp_out_edit.text().strip(),
+            clean_c_data=self.uwp_cleanup_cb.isChecked(),
+        )
+        self._uwp_decrypt_worker.log_msg.connect(self._append_log)
+        self._uwp_decrypt_worker.book_done.connect(self._on_uwp_book_done)
+        self._uwp_decrypt_worker.book_failed.connect(self._on_uwp_book_failed)
+        self._uwp_decrypt_worker.batch_done.connect(self._on_uwp_batch_done)
+        self._uwp_decrypt_worker.start()
+
+    def _on_uwp_book_done(self, asin, title, path):
+        it = self._find_uwp_item(asin)
+        if it is not None:
+            it.setText(f'{title}  ({asin})')
+            it.setForeground(QBrush(QColor(0, 150, 0)))
+        self._append_log(f'OK: {asin} -> {title} ({path})')
+
+    def _on_uwp_book_failed(self, asin, err):
+        it = self._find_uwp_item(asin)
+        if it is not None:
+            it.setText(it.text() + '  [failed]')
+            it.setForeground(QBrush(QColor(180, 0, 0)))
+        self._append_log(f'FAIL: {asin} - {err}')
+
+    def _on_uwp_batch_done(self, ok, fail):
+        self.uwp_decrypt_btn.setEnabled(True)
+        self.uwp_scan_btn.setEnabled(True)
+        self._append_log(f'Decrypt done: {ok} succeeded, {fail} failed')
+        QMessageBox.information(self, 'UWP Library', f'Decryption complete: {ok} OK, {fail} failed.')
+        self._uwp_decrypt_worker = None
+
+    def _find_uwp_item(self, asin):
+        for i in range(self.uwp_list.count()):
+            if self.uwp_list.item(i).data(Qt.ItemDataRole.UserRole) == asin:
+                return self.uwp_list.item(i)
+        return None
 

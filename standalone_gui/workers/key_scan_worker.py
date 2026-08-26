@@ -18,11 +18,11 @@ from standalone_gui import compat  # noqa: F401
 def _find_extractors():
     """Locate all bundled KFX key extractor executables.
     Returns list of (name, path) — tried in order.
+
+    与 _find_kfxkey_files/_try_frida_extraction 一致地用 __file__ 推导 base：
+    非 frozen = standalone_gui/tools；frozen(onefile) = _MEIPASS/standalone_gui/tools。
     """
-    if getattr(sys, 'frozen', False):
-        base = sys._MEIPASS
-    else:
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     tools_dir = os.path.join(base, 'tools')
 
     result = []
@@ -50,6 +50,62 @@ def _find_kindle_content_dir():
                     return val
             except OSError:
                 continue
+    except Exception:
+        pass
+    return None
+
+
+def _find_uwp_content_dir():
+    """Locate the Microsoft Store (UWP) Kindle content directory.
+
+    Mirrors MSIXKFXArchiver.cpp FindPackagesViaRegistry: enumerate the AppModel
+    package repository and find the AmazonKindleReadingApp family name.
+    Returns <LocalAppData>\\Packages\\<family>\\LocalState\\Classic\\Content if the
+    content dir exists on disk, else None.
+    """
+    if not sys.platform.startswith('win'):
+        return None
+    try:
+        import winreg
+        repo = (r'Software\Classes\Local Settings\Software\Microsoft\Windows'
+                r'\CurrentVersion\AppModel\Repository\Packages')
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, repo) as parent:
+            for i in range(winreg.QueryInfoKey(parent)[0]):
+                try:
+                    name = winreg.EnumKey(parent, i)
+                except OSError:
+                    break
+                if 'AmazonKindleReadingApp' not in name:
+                    continue
+                # Prefer PackageFamilyName; the ._<version>_x86 part is stripped
+                # off so the value becomes the real folder name under %LocalAppData%.
+                family = None
+                try:
+                    with winreg.OpenKey(parent, name) as sub:
+                        for vn in ('PackageFamilyName', 'PackageID'):
+                            try:
+                                val, _ = winreg.QueryValueEx(sub, vn)
+                                if val:
+                                    family = str(val)
+                                    break
+                            except OSError:
+                                continue
+                except OSError:
+                    continue
+                if family:
+                    # PackageID looks like
+                    # "AMZNKindle.AmazonKindleReadingApp_1.0.16034.0_x86__m1sc522ngdk36"
+                    # The real folder name drops the version/arch segment and keeps the
+                    # publisher suffix: "AMZNKindle.AmazonKindleReadingApp_m1sc522ngdk36".
+                    parts = family.split('_')
+                    if len(parts) > 2:
+                        family = parts[0] + '_' + parts[-1]
+                content = os.path.join(
+                    os.environ.get('LOCALAPPDATA', ''),
+                    'Packages', family, 'LocalState', 'Classic', 'Content',
+                )
+                if os.path.isdir(content):
+                    return content
     except Exception:
         pass
     return None

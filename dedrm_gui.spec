@@ -73,6 +73,7 @@ a = Analysis(
         'standalone_gui.tabs.serials_pids_tab', 'standalone_gui.tabs.settings_tab',
         'standalone_gui.workers',
         'standalone_gui.workers.decrypt_worker', 'standalone_gui.workers.key_scan_worker',
+        'standalone_gui.workers.uwp_library_worker',
         # Third-party
         'lxml', 'lxml.etree', 'lxml._elementpath',
         'Crypto', 'Crypto.Cipher', 'Crypto.Cipher.AES',

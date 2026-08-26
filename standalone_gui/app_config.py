@@ -116,3 +116,11 @@ class AppConfig:
             f: os.path.isfile(os.path.join(d, f))
             for f in ('devicesalt', 'device.xml', 'activation.xml')
         }
+
+    # --- UWP (Microsoft Store) Kindle content dir ---
+    def get_uwp_content_dir(self):
+        return self._cfg().get('uwp_content_dir', '')
+
+    def set_uwp_content_dir(self, path):
+        self.prefs.set('uwp_content_dir', path)
+        self._cfg().commit()
