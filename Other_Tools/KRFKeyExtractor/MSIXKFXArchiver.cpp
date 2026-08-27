@@ -2482,6 +2482,70 @@ ExecOffsets KindleReader1_0_22920()
     ret.entry = 0;
     return ret;
 }
+//f21b5ad7e1d05d3430cf2eb80cec6c97
+ExecOffsets KindleReader1_0_23514()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x111499e0;
+    ret.get_plugin_man = 0x1115a730;
+    ret.load_all = 0x1115a830;
+    ret.make_storage = 0x10eca690;
+
+    ret.spatches.push_back(ppatch(0x10eca6c4, { 0xe9, 0xd6, 0x00, 0x00, 0x00 }));
+    ret.spatches.push_back(ppatch(0x10eca0f4, { 0xe9, 0xf9, 0x00, 0x00, 0x00 }));
+    ret.get_storage_value = 0x1008ad10;
+    ret.deobfuscate_storage = 0x10089dc0;
+    ret.drm_provider = 0x1116c230;
+
+    ret.get_factory = 0x1116be20;
+    ret.open_book = 0x1116bef0;
+
+
+
+    ret.decr_offset = 0x11bb82b0;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.23514";
+    ret.vernum = 6;
+
+    ret.entry = 0;
+    return ret;
+}
+
+//c19569a98e72d4e1109e6cfa37db47cf
+ExecOffsets KindleReader1_0_23620()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x111499e0;
+    ret.get_plugin_man = 0x1115a730;
+    ret.load_all = 0x1115a830;
+    ret.make_storage = 0x10eca690;
+
+    ret.spatches.push_back(ppatch(0x10eca6c4, { 0xe9, 0xd6, 0x00, 0x00, 0x00 }));
+    ret.spatches.push_back(ppatch(0x10eca0f4, { 0xe9, 0xf9, 0x00, 0x00, 0x00 }));
+    ret.get_storage_value = 0x1008ad10;
+    ret.deobfuscate_storage = 0x10089dc0;
+    ret.drm_provider = 0x1116c230;
+
+    ret.get_factory = 0x1116be20;
+    ret.open_book = 0x1116bef0;
+    
+
+
+    ret.decr_offset = 0x11bb82b0;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.23620";
+    ret.vernum = 7;
+
+    ret.entry = 0;
+    return ret;
+}
+
 struct IATRESULTS
 {
     enum class FAILUREREASON
@@ -4876,7 +4940,8 @@ int wmain(int argc, wchar_t * argv[])
     supportMap["a5af62fd27d6cf599575ba0c1c112985"] = KindleReader1_0_18632();
     supportMap["7a7f3827c80e19a4ebda38c2853eb590"] = KindleReader1_0_22326();
     supportMap["5deec17cc97e250f1954a0c4b2c86005"] = KindleReader1_0_22920();
-
+    supportMap["f21b5ad7e1d05d3430cf2eb80cec6c97"] = KindleReader1_0_23514();
+    supportMap["c19569a98e72d4e1109e6cfa37db47cf"] = KindleReader1_0_23620();
    
     if (argc < 4)
     {
