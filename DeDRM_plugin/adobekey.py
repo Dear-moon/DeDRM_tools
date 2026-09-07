@@ -46,9 +46,12 @@ from base64 import b64decode
 
 #@@CALIBRE_COMPAT_CODE@@
 
-
-from .utilities import SafeUnbuffered
-from .argv_utils import unicode_argv
+try:
+    from .utilities import SafeUnbuffered
+    from .argv_utils import unicode_argv
+except ImportError:
+    from utilities import SafeUnbuffered
+    from argv_utils import unicode_argv
 
 
 try:
